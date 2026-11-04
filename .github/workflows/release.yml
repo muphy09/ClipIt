@@ -1,0 +1,49 @@
+name: Windows Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verify version and tag
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content source/ClipIt.csproj
+          $version = [string]$project.Project.PropertyGroup.Version
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw 'Run this workflow against the matching version tag.' }
+          "CLIPIT_RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Build, check and package Windows x64
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/Package.ps1
+      - name: Publish installer and update feed
+        shell: pwsh
+        env:
+          VPK_TOKEN: ${{ github.token }}
+        run: |
+          . ./scripts/Common.ps1
+          dotnet vpk upload github --repoUrl https://github.com/muphy09/ClipIt --outputDir artifacts/releases --channel win --tag "v$env:CLIPIT_RELEASE_VERSION" --releaseName "ClipIt $env:CLIPIT_RELEASE_VERSION" --targetCommitish $env:GITHUB_SHA --merge --publish
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
+      - name: Preserve build results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-${{ github.ref_name }}
+          path: |
+            artifacts/releases/
+            .local/media-checks/media-check-results.json

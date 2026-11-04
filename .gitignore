@@ -1,0 +1,13 @@
+.local/
+artifacts/
+**/bin/
+**/obj/
+**/.build/
+.vs/
+*.user
+*.pdb
+.env
+.env.*
+*.pfx
+*.key
+*.log

@@ -1,0 +1,168 @@
+<Window x:Class="ClipIt.ClipWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="ClipIt 0.4" Width="1100" Height="940" MinWidth="1000" MinHeight="740"
+        WindowStartupLocation="CenterScreen" Background="#0B1019" Foreground="#EFF4FC"
+        FontFamily="Segoe UI" FontSize="13" ResizeMode="CanResize" WindowStyle="None"
+        Icon="Assets/ClipIt.ico" UseLayoutRounding="True" SnapsToDevicePixels="True">
+  <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="42" ResizeBorderThickness="6" CornerRadius="12" GlassFrameThickness="0" UseAeroCaptionButtons="False"/></shell:WindowChrome.WindowChrome>
+  <Window.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="Theme.xaml"/></ResourceDictionary.MergedDictionaries>
+      <ImageBrush x:Key="BrandMark" ImageSource="Assets/ClipIt-logo.png" ViewboxUnits="RelativeToBoundingBox" Viewbox="0.183,0.117,0.610,0.517" Stretch="Uniform"/>
+    </ResourceDictionary>
+  </Window.Resources>
+  <Border BorderBrush="#28364B" BorderThickness="1" CornerRadius="11" ClipToBounds="True">
+    <Grid>
+      <Grid.RowDefinitions><RowDefinition Height="42"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <!-- Custom title bar retains native drag, resize, snap and keyboard behavior. -->
+      <Grid Background="#0D1420">
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
+          <Rectangle Width="20" Height="20" Fill="{StaticResource BrandMark}"/>
+          <TextBlock Text="ClipIt" Margin="9,0,0,0" FontSize="12" FontWeight="SemiBold"/>
+          <TextBlock x:Name="HeaderVersion" Text=" /  INSTANT REPLAY" Foreground="#7890B0" FontSize="10" Margin="8,2,0,0"/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+          <Button Style="{StaticResource Quiet}" Width="44" Padding="0" Click="Minimize_Click" ToolTip="Minimize" AutomationProperties.Name="Minimize"><Path Data="M 0 0 L 10 0" Stroke="#9CADC5" StrokeThickness="1"/></Button>
+          <Button Style="{StaticResource Quiet}" Width="44" Padding="0" Click="Maximize_Click" ToolTip="Maximize or restore" AutomationProperties.Name="Maximize or restore"><Rectangle Width="9" Height="9" Stroke="#9CADC5" StrokeThickness="1"/></Button>
+          <Button Style="{StaticResource Quiet}" Width="44" Padding="0" Click="Hide_Click" ToolTip="Keep running in tray" AutomationProperties.Name="Close to tray"><Path Data="M 0 0 L 9 9 M 9 0 L 0 9" Stroke="#9CADC5" StrokeThickness="1.2"/></Button>
+        </StackPanel>
+      </Grid>
+      <Grid Grid.Row="1">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="196"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <Border Background="#0E1521" BorderBrush="#1D293A" BorderThickness="0,0,1,0">
+          <Grid Margin="18,26,18,20">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <StackPanel>
+              <StackPanel Orientation="Horizontal" Margin="6,0,0,0">
+                <Rectangle Width="39" Height="36" Fill="{StaticResource BrandMark}"/>
+                <TextBlock Text="ClipIt" FontSize="25" FontWeight="Bold" Margin="10,0,0,0" VerticalAlignment="Center"/>
+              </StackPanel>
+              <TextBlock Text="KEEP THE GOOD PART." FontSize="9" Foreground="#647995" Margin="8,15,0,30"/>
+            </StackPanel>
+            <StackPanel Grid.Row="1">
+              <Button x:Name="CaptureNav" Background="#14294A" BorderBrush="#244876" Padding="14,12" Margin="0,0,0,8" Click="Capture_Click" AutomationProperties.Name="Capture settings">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE714;" FontFamily="Segoe Fluent Icons" Foreground="#70A7FF" FontSize="16" Margin="0,0,11,0"/><TextBlock Text="Capture" Foreground="#A8CBFF" FontWeight="SemiBold"/></StackPanel>
+              </Button>
+              <Button x:Name="LibraryNav" Style="{StaticResource Quiet}" HorizontalContentAlignment="Left" Click="Library_Click" Padding="14,12" AutomationProperties.Name="Your clips">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons" Foreground="#7B91AF" FontSize="16" Margin="0,0,11,0"/><TextBlock Text="Your clips" Foreground="#93A5BF"/></StackPanel>
+              </Button>
+            </StackPanel>
+            <StackPanel Grid.Row="3">
+              <Border Background="#111E30" BorderBrush="#24354C" BorderThickness="1" CornerRadius="9" Padding="13">
+                <StackPanel>
+                  <StackPanel Orientation="Horizontal"><Ellipse x:Name="SideDot" Width="6" Height="6" Fill="#F2BC66" Margin="0,0,7,0"/><TextBlock x:Name="SideStatus" Text="Starting recorder" FontSize="11" Foreground="#BBCBE0"/></StackPanel>
+                  <TextBlock Text="Automatic recovery on" Foreground="#647E9E" FontSize="10" Margin="13,7,0,0"/>
+                </StackPanel>
+              </Border>
+              <Button Style="{StaticResource Quiet}" Content="Help &amp; shortcuts" Click="Help_Click" Margin="0,15,0,4" Padding="8,7" HorizontalAlignment="Left" FontSize="11"/>
+              <WrapPanel Margin="8,3,0,0">
+                <TextBlock x:Name="VersionLabel" Foreground="#7890B0" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                <TextBlock x:Name="UpdateLabel" Text="- Checking for updates…" Foreground="#7890B0" FontSize="10" MaxWidth="148" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                <Button x:Name="UpdateButton" Visibility="Collapsed" Content="- Apply Update" Style="{StaticResource Quiet}" FontSize="10" Padding="4,6" HorizontalAlignment="Left" Click="Update_Click" AutomationProperties.Name="Update status" ToolTip="Updates download in the background and apply on demand or after a full quit and relaunch."/>
+              </WrapPanel>
+            </StackPanel>
+          </Grid>
+        </Border>
+        <Grid x:Name="CapturePanel" Grid.Column="1">
+          <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="72"/></Grid.RowDefinitions>
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,5,0">
+            <StackPanel Margin="30,24,25,24">
+              <Grid Margin="0,0,0,21">
+                <StackPanel><TextBlock Text="Capture" FontSize="27" FontWeight="SemiBold"/><TextBlock Text="A great moment deserves a second look." Style="{StaticResource MutedText}" Margin="0,5,0,0"/></StackPanel>
+                <Border Background="#14233A" CornerRadius="6" Padding="10,6" HorizontalAlignment="Right" VerticalAlignment="Center"><TextBlock Text="2 MIN REPLAY" Foreground="#88ACDE" FontSize="10" FontWeight="SemiBold"/></Border>
+              </Grid>
+              <Border BorderBrush="#29466E" BorderThickness="1" CornerRadius="12" Padding="22" Margin="0,0,0,16">
+                <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#162B47"/><GradientStop Offset="1" Color="#111B2B"/></LinearGradientBrush></Border.Background>
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,9"><Ellipse x:Name="LiveDot" Width="7" Height="7" Fill="#F2BC66" Margin="0,0,8,0"/><TextBlock x:Name="LiveLabel" Text="GETTING READY" Foreground="#8AB6F6" FontSize="10" FontWeight="SemiBold"/></StackPanel>
+                    <TextBlock x:Name="StatusTitle" Text="Your next highlight starts here." FontSize="21" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="StatusDescription" Text="Starting capture. Your replay buffer will fill automatically." Style="{StaticResource MutedText}" Margin="0,7,15,0" TextWrapping="Wrap"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="18,0,0,0">
+                    <Button x:Name="SaveClipButton" Style="{StaticResource Primary}" MinWidth="142" Click="SaveClip_Click" Padding="18,12" AutomationProperties.Name="Save clip"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74E;" FontFamily="Segoe Fluent Icons" Margin="0,0,9,0" VerticalAlignment="Center"/><TextBlock x:Name="SaveButtonText" Text="Save clip" FontWeight="SemiBold" Foreground="White"/></StackPanel></Button>
+                    <Button x:Name="PauseButton" Style="{StaticResource Quiet}" Content="Pause recording" Click="Pause_Click" Padding="8,8" Margin="0,5,0,0" FontSize="11"/>
+                  </StackPanel>
+                </Grid>
+              </Border>
+              <Grid Margin="2,0,2,20">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="5"/></Grid.RowDefinitions>
+                <TextBlock x:Name="BufferDescription" Text="Replay buffer" FontSize="11" Foreground="#7F96B5" Margin="0,0,0,9"/>
+                <TextBlock x:Name="BufferTime" Text="00:00 / 02:00" HorizontalAlignment="Right" FontFamily="Cascadia Mono, Consolas" FontSize="11" Foreground="#AEC5E5"/>
+                <Border Grid.Row="1" Background="#1D2A3F" CornerRadius="2.5"/>
+                <Border x:Name="BufferFill" Grid.Row="1" Background="#4D8DFF" CornerRadius="2.5" HorizontalAlignment="Left" Width="0"/>
+              </Grid>
+              <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                <StackPanel>
+                  <Grid Margin="0,0,0,18"><TextBlock Text="Capture &amp; quality" FontWeight="SemiBold" FontSize="14"/><TextBlock Text="HARDWARE ENCODED" FontSize="9" Foreground="#6289BC" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="2.2*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="Display" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="MonitorBox" AutomationProperties.Name="Capture display"/></StackPanel>
+                    <StackPanel Grid.Column="2"><TextBlock Text="Resolution" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="QualityBox" AutomationProperties.Name="Resolution cap"/></StackPanel>
+                    <StackPanel Grid.Column="4"><TextBlock Text="Frame rate" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="FpsBox" AutomationProperties.Name="Frame rate"/></StackPanel>
+                  </Grid>
+                  <Grid Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center"><TextBlock Text="Video bitrate" FontSize="12" Foreground="#BECBDD"/><TextBlock Text="Higher bitrate keeps more detail in fast-moving scenes." Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"/></StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><TextBox x:Name="BitrateBox" Width="74" TextAlignment="Center" AutomationProperties.Name="Video bitrate in Mbps"/><TextBlock Text="Mbps" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="#7188A8" FontSize="12"/></StackPanel>
+                  </Grid>
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                <StackPanel>
+                  <TextBlock Text="Save your moments" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,18"/>
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="Save folder" Style="{StaticResource FieldLabel}"/><TextBox x:Name="FolderBox" AutomationProperties.Name="Save folder" ToolTip="Clips are saved in per-application subfolders here."/></StackPanel>
+                    <Button Grid.Column="2" Content="Browse" Click="Browse_Click" VerticalAlignment="Bottom" Height="40" Padding="17,0"/>
+                  </Grid>
+                  <Grid Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="230"/></Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center"><TextBlock Text="Save shortcut" FontSize="12" Foreground="#BECBDD"/><TextBlock Text="Works while you're in a game or another app." Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,15,0"/></StackPanel>
+                    <TextBox x:Name="ShortcutBox" Grid.Column="1" IsReadOnly="True" TextAlignment="Center" FontWeight="SemiBold" Foreground="#A9CCFF" PreviewKeyDown="Shortcut_KeyDown" GotKeyboardFocus="Shortcut_Focused" LostKeyboardFocus="Shortcut_Blurred" AutomationProperties.Name="Save shortcut" ToolTip="Click and press a shortcut that includes Ctrl or Alt."/>
+                  </Grid>
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                <StackPanel>
+                  <TextBlock Text="Game &amp; Discord audio" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,14"/>
+                  <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ComboBox x:Name="GameAppBox" AutomationProperties.Name="Game audio application"/><Button Grid.Column="1" Content="Refresh apps" Style="{StaticResource Quiet}" Click="RefreshApps_Click" Margin="8,0,0,0"/></Grid>
+                  <TextBlock x:Name="GameCaptureStatus" Text="Checking the application audio source…" Foreground="#95B9E9" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"/>
+                  <TextBlock Text="Automatic mode follows a full-screen game and retains it while you alt-tab. Discord and microphone are separate tracks." Foreground="#879FBE" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource Card}">
+                <StackPanel>
+                  <Grid Margin="0,0,0,17"><TextBlock Text="Audio &amp; cursor" FontWeight="SemiBold" FontSize="14"/><TextBlock Text="SEPARATE AUDIO TRACKS" Foreground="#6289BC" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="36"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <CheckBox x:Name="MicToggle" AutomationProperties.Name="Include microphone"><StackPanel><TextBlock Text="Microphone" FontSize="12"/><TextBlock Text="Record the selected input" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"/></StackPanel></CheckBox>
+                    <CheckBox x:Name="CursorToggle" Grid.Column="2" AutomationProperties.Name="Include mouse cursor"><StackPanel><TextBlock Text="Mouse cursor" FontSize="12"/><TextBlock Text="Show the pointer in clips" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"/></StackPanel></CheckBox>
+                  </Grid>
+                  <Grid Margin="0,15,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <ComboBox x:Name="MicrophoneBox" AutomationProperties.Name="Microphone device" ToolTip="Select a specific microphone, or follow the system default."/>
+                    <Button Grid.Column="1" Content="Refresh devices" Style="{StaticResource Quiet}" Click="RefreshMicrophones_Click" Margin="8,0,0,0" FontSize="11"/>
+                  </Grid>
+                </StackPanel>
+              </Border>
+              <Border x:Name="NoticeBorder" Background="#142942" BorderBrush="#2B4D76" BorderThickness="1" CornerRadius="8" Padding="13" Margin="0,14,0,0" Visibility="Collapsed"><TextBlock x:Name="NoticeText" Foreground="#B5D3FC" TextWrapping="Wrap" FontSize="12"/></Border>
+              <Grid Margin="2,18,2,0"><TextBlock x:Name="LastClipLabel" Text="Your clips stay on your PC. Ready whenever you are." Style="{StaticResource MutedText}" FontSize="11" TextTrimming="CharacterEllipsis"/></Grid>
+            </StackPanel>
+          </ScrollViewer>
+          <Border Grid.Row="1" Background="#101825" BorderBrush="#243147" BorderThickness="0,1,0,0" Padding="30,0">
+            <Grid>
+              <StackPanel VerticalAlignment="Center" Margin="0,0,160,0"><TextBlock x:Name="SettingsHint" Text="Make it yours." Foreground="#C0CEE1" FontSize="12"/><TextBlock x:Name="SettingsSubtext" Text="Applying capture settings starts a fresh replay buffer." Foreground="#7E96B7" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
+              <Button x:Name="ApplyButton" Content="Apply settings" Style="{StaticResource Primary}" Click="Apply_Click" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="138"/>
+            </Grid>
+          </Border>
+        </Grid>
+        <Border x:Name="LibraryHost" Grid.Column="1" Visibility="Collapsed"/>
+      </Grid>
+    </Grid>
+  </Border>
+</Window>
+

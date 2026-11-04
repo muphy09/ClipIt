@@ -1,0 +1,267 @@
+using System.Diagnostics;
+using System.Windows.Input;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
+using MouseEventArgs = System.Windows.Input.MouseEventArgs;
+using System.Windows.Threading;
+using Wpf = System.Windows;
+using C = System.Windows.Controls;
+using M = System.Windows.Media;
+
+namespace ClipIt;
+
+public partial class ClipEditor : C.UserControl, IDisposable
+{
+    private string path = "";
+    private ClipInfo? info;
+    private ClipStamp stamp;
+    private bool playing, opened, settingSeek, seeking, resumeAfterSeek, loadingMix;
+    private int generation;
+    private CancellationTokenSource? loading, rendering;
+    private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(80) };
+    private readonly DispatcherTimer overlayTimer = new() { Interval = TimeSpan.FromSeconds(2.2) };
+    private readonly M.MediaPlayer[] stems = [new(), new(), new()];
+    private readonly bool[] stemReady = new bool[3];
+    private AudioPreview? audioPreview;
+    private Wpf.Window? fullscreen;
+    private Wpf.Point dragStart;
+    private double lastStart;
+    public bool Busy => rendering != null;
+    public event EventHandler? BackRequested;
+    public event EventHandler<string>? FileChanged;
+
+    public ClipEditor()
+    {
+        InitializeComponent();
+        for (int i = 0; i < stems.Length; i++)
+        {
+            int index = i;
+            stems[i].MediaOpened += (_, _) => { stemReady[index] = true; stems[index].Position = Player.Position; if (playing) stems[index].Play(); ApplyVolumes(); };
+            stems[i].MediaFailed += (_, e) => { stemReady[index] = false; EditorMessage.Text = "A source's preview audio is unavailable: " + e.ErrorException.Message; };
+        }
+        timer.Tick += (_, _) =>
+        {
+            if (!opened || info == null) return;
+            double p = Player.Position.TotalSeconds;
+            if (playing && p >= Range.End - .025) { Pause(); Seek(Range.Start); p = Range.Start; }
+            PositionLabel.Text = MediaTools.Time(p); Range.SetPosition(p);
+            if (!seeking) { settingSeek = true; SeekSlider.Value = Math.Clamp(p, 0, info.Duration); settingSeek = false; }
+            if (playing && info.HasStems)
+                for (int i = 0; i < stems.Length; i++) if (stemReady[i] && Math.Abs(stems[i].Position.TotalSeconds - p) > .075) stems[i].Position = TimeSpan.FromSeconds(p);
+        };
+        overlayTimer.Tick += (_, _) => { overlayTimer.Stop(); if (playing && !PlaybackOverlay.IsMouseOver && !seeking) HideOverlay(); };
+        IsVisibleChanged += (_, _) => { if (!IsVisible) Suspend(); };
+    }
+
+    public async Task Open(string file)
+    {
+        if (Busy) return;
+        int current = ++generation;
+        loading?.Cancel(); loading?.Dispose(); loading = new();
+        ClosePlayback(); info = null; path = file;
+        NameEdit.Visibility = Wpf.Visibility.Collapsed; NameDisplay.Visibility = Wpf.Visibility.Visible;
+        ClipTitle.Text = Path.GetFileNameWithoutExtension(file); ClipTitle.ToolTip = file;
+        PlayerPlaceholder.Text = "Loading your clip…"; PlayerPlaceholder.Visibility = Wpf.Visibility.Visible;
+        SetControls(false); EditorMessage.Text = "Reading clip…";
+        try
+        {
+            stamp = ClipStamp.Read(file);
+            var read = await MediaTools.Probe(file, loading.Token);
+            if (current != generation) return;
+            info = read; Range.Setup(read.Duration); UpdateRange(); lastStart = 0;
+            ClipDetails.Text = $"{read.Width} × {read.Height}  ·  {MediaTools.Time(read.Duration)}  ·  {read.Size / 1048576.0:0.#} MB";
+            DurationLabel.Text = MediaTools.Time(read.Duration);
+            settingSeek = true; SeekSlider.Maximum = read.Duration; SeekSlider.Value = 0; settingSeek = false;
+            loadingMix = true;
+            GameVolume.Value = Math.Clamp(read.Mix.Game, 0, 1); DiscordVolume.Value = Math.Clamp(read.Mix.Discord, 0, 1); MicrophoneVolume.Value = Math.Clamp(read.Mix.Microphone, 0, 1);
+            GameMute.IsChecked = read.Mix.GameMuted; DiscordMute.IsChecked = read.Mix.DiscordMuted; MicrophoneMute.IsChecked = read.Mix.MicrophoneMuted;
+            loadingMix = false;
+            GameLabel.Text = read.HasStems ? "Game" : "Recorded mix";
+            DiscordMixer.IsEnabled = MicrophoneMixer.IsEnabled = read.HasStems;
+            DiscordMixer.Opacity = MicrophoneMixer.Opacity = read.HasStems ? 1 : .35;
+            MixerHint.Text = read.HasStems ? "Separate sources · saved with your trim" : "Older mixed audio · sources cannot be isolated";
+            Player.Source = new Uri(file); Player.Volume = read.HasStems ? 0 : VolumeSlider.Value * CurrentMix().GameGain; Player.Play(); Player.Pause();
+            if (read.HasStems)
+            {
+                EditorMessage.Text = "Preparing separate audio for the mixer…";
+                var preview = await MediaTools.ExtractStems(file, loading.Token);
+                if (current != generation) { preview.Dispose(); return; }
+                audioPreview = preview;
+                for (int i = 0; i < 3; i++) { stems[i].Open(new Uri(preview.Files[i])); stems[i].Pause(); }
+            }
+            EditorMessage.Text = "Drag the blue handles to trim. Save trim also saves your playback mix.";
+            SetControls(true); ApplyVolumes(); timer.Start(); ShowOverlay();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { if (current == generation) { PlayerPlaceholder.Text = "This clip couldn't be prepared."; EditorMessage.Text = ex.Message; } }
+    }
+
+    private MixSettings CurrentMix() => new(GameVolume.Value, DiscordVolume.Value, MicrophoneVolume.Value, GameMute.IsChecked == true, DiscordMute.IsChecked == true, MicrophoneMute.IsChecked == true);
+    private void ApplyVolumes()
+    {
+        if (info == null || GameVolume == null || loadingMix) return;
+        var mix = CurrentMix(); double master = VolumeSlider.Value;
+        Player.Volume = info.HasStems ? 0 : mix.GameGain * master;
+        stems[0].Volume = mix.GameGain * master; stems[1].Volume = mix.DiscordGain * master; stems[2].Volume = mix.MicrophoneGain * master;
+    }
+    private void Mix_Changed(object sender, Wpf.RoutedEventArgs e) { if (!loadingMix) ApplyVolumes(); }
+    private void MixVolume_Changed(object sender, Wpf.RoutedPropertyChangedEventArgs<double> e) { if (!loadingMix) ApplyVolumes(); }
+    private void Volume_Changed(object sender, Wpf.RoutedPropertyChangedEventArgs<double> e) => ApplyVolumes();
+    private void Player_Opened(object sender, Wpf.RoutedEventArgs e)
+    {
+        opened = true; PlayerPlaceholder.Visibility = Wpf.Visibility.Collapsed;
+        Player.Pause(); Seek(Range.Start); PlayButton.Content = "Play";
+    }
+    private void Player_Failed(object sender, Wpf.ExceptionRoutedEventArgs e)
+    {
+        opened = false; PlayerPlaceholder.Text = "Playback is unavailable for this clip."; PlayerPlaceholder.Visibility = Wpf.Visibility.Visible;
+        EditorMessage.Text = "Windows couldn't play this file. Open in Explorer is still available.";
+        Log.Write("Playback: " + e.ErrorException.Message);
+    }
+    private void Player_Ended(object sender, Wpf.RoutedEventArgs e) { Pause(); Seek(Range.Start); }
+    private void Play_Click(object sender, Wpf.RoutedEventArgs e) => TogglePlay();
+    private void TogglePlay()
+    {
+        if (!opened || Busy || !PlayButton.IsEnabled) return;
+        if (playing) Pause();
+        else
+        {
+            if (Player.Position.TotalSeconds < Range.Start || Player.Position.TotalSeconds >= Range.End - .05) Seek(Range.Start);
+            StartPlayback();
+        }
+        ShowOverlay();
+    }
+    private void StartPlayback()
+    {
+        Player.Play(); playing = true; PlayButton.Content = "Pause";
+        if (info?.HasStems == true) for (int i = 0; i < 3; i++) if (stemReady[i]) { stems[i].Position = Player.Position; stems[i].Play(); }
+    }
+    public void Pause() { Player.Pause(); foreach (var stem in stems) stem.Pause(); playing = false; PlayButton.Content = "Play"; }
+    public void Suspend() { Pause(); ExitFullscreen(); }
+    private void Seek(double position)
+    {
+        if (info == null) return;
+        position = Math.Clamp(position, 0, info.Duration);
+        Player.Position = TimeSpan.FromSeconds(position);
+        for (int i = 0; i < 3; i++) if (stemReady[i]) stems[i].Position = Player.Position;
+        Range.SetPosition(position); PositionLabel.Text = MediaTools.Time(position);
+    }
+    private void Seek_Changed(object sender, Wpf.RoutedPropertyChangedEventArgs<double> e) { if (!settingSeek && opened && !Busy) Seek(e.NewValue); }
+    private void Seek_Down(object sender, MouseButtonEventArgs e) { seeking = true; resumeAfterSeek = playing; Pause(); }
+    private void Seek_Up(object sender, MouseButtonEventArgs e) { seeking = false; if (resumeAfterSeek && opened && !Busy) StartPlayback(); resumeAfterSeek = false; }
+    private void Range_Changed(object? sender, EventArgs e)
+    {
+        if (info == null) return;
+        if (opened && !Busy) { Pause(); Seek(Math.Abs(Range.Start - lastStart) > .0001 ? Range.Start : Math.Max(Range.Start, Range.End - 1.0 / 60)); }
+        lastStart = Range.Start; UpdateRange();
+    }
+    private void Range_Seek(object? sender, double position) { if (opened && !Busy) { Pause(); Seek(position); ShowOverlay(); } }
+    private void UpdateRange() { SelectionLabel.Text = "Selected  " + MediaTools.Time(Range.End - Range.Start); RangeLabel.Text = MediaTools.Time(Range.Start) + "  –  " + MediaTools.Time(Range.End); }
+    private void SetStart_Click(object sender, Wpf.RoutedEventArgs e) { if (opened) Range.SetRange(Math.Min(Player.Position.TotalSeconds, Range.End - .1), Range.End); }
+    private void SetEnd_Click(object sender, Wpf.RoutedEventArgs e) { if (opened) Range.SetRange(Range.Start, Math.Max(Range.Start + .1, Player.Position.TotalSeconds)); }
+    private void Reset_Click(object sender, Wpf.RoutedEventArgs e) { if (info != null) { Range.Setup(info.Duration); UpdateRange(); Seek(0); } }
+    private async void Trim_Click(object sender, Wpf.RoutedEventArgs e) { if (info != null && Range.End - Range.Start >= .1) await Render(); }
+    private async Task Render()
+    {
+        if (Busy || info == null) return;
+        var mix = CurrentMix(); double start = Range.Start, end = Range.End;
+        var cts = new CancellationTokenSource(); rendering = cts;
+        ExitFullscreen(); ClosePlayback();
+        SetControls(false); BackButton.IsEnabled = false; CancelButton.Visibility = RenderProgress.Visibility = Wpf.Visibility.Visible; TrimButton.Content = "Saving…";
+        EditorMessage.Text = "Saving your trim and mix… The original stays intact until the replacement is ready.";
+        bool success = false;
+        try { await MediaTools.Trim(path, path, start, end, stamp, cts.Token, mix); success = true; FileChanged?.Invoke(this, path); }
+        catch (OperationCanceledException) { EditorMessage.Text = "Canceled. Your original clip has been kept."; }
+        catch (Exception ex) { EditorMessage.Text = ex.Message; Log.Write("Editor: " + ex); }
+        finally { rendering = null; cts.Dispose(); BackButton.IsEnabled = true; CancelButton.Visibility = RenderProgress.Visibility = Wpf.Visibility.Collapsed; TrimButton.Content = "Save trim"; }
+        string message = success ? "Trim and playback mix saved. Separate source tracks remain editable." : EditorMessage.Text;
+        await Open(path); EditorMessage.Text = message;
+    }
+    private void SetControls(bool enabled)
+    {
+        PlayButton.IsEnabled = SeekSlider.IsEnabled = Range.IsEnabled = TrimButton.IsEnabled = ResetButton.IsEnabled = DragButton.IsEnabled = RenameButton.IsEnabled = MarkStartButton.IsEnabled = MarkEndButton.IsEnabled = FullscreenButton.IsEnabled = enabled;
+        GameVolume.IsEnabled = GameMute.IsEnabled = enabled;
+        DiscordMixer.IsEnabled = MicrophoneMixer.IsEnabled = enabled && info?.HasStems == true;
+    }
+    private void Cancel_Click(object sender, Wpf.RoutedEventArgs e) => rendering?.Cancel();
+    private void Back_Click(object sender, Wpf.RoutedEventArgs e) { if (!Busy) { CloseMedia(); BackRequested?.Invoke(this, EventArgs.Empty); } }
+    private void Explorer_Click(object sender, Wpf.RoutedEventArgs e)
+    {
+        try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true }); }
+        catch (Exception ex) { EditorMessage.Text = ex.Message; }
+    }
+    private void Rename_Click(object sender, Wpf.RoutedEventArgs e)
+    {
+        if (Busy) return;
+        NameEdit.Text = Path.GetFileNameWithoutExtension(path); NameDisplay.Visibility = Wpf.Visibility.Collapsed; NameEdit.Visibility = Wpf.Visibility.Visible; NameEdit.Focus(); NameEdit.SelectAll();
+    }
+    private async void Name_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape) { CancelRename(); e.Handled = true; }
+        if (e.Key != Key.Enter) return;
+        e.Handled = true;
+        string name = NameEdit.Text.Trim();
+        if (name.Length == 0 || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.EndsWith('.') || name.StartsWith(".clipit-", StringComparison.OrdinalIgnoreCase) || AppTargets.FolderName(name) != name)
+        { EditorMessage.Text = "Enter a valid filename without slashes, reserved names or a trailing period."; return; }
+        string next = Path.Combine(Path.GetDirectoryName(path)!, name + ".mp4");
+        if (string.Equals(next, path, StringComparison.OrdinalIgnoreCase)) { CancelRename(); return; }
+        try
+        {
+            if (File.Exists(next)) throw new IOException("A clip with that name already exists.");
+            if (ClipStamp.Read(path) != stamp) throw new IOException("This clip changed. Reopen it before renaming.");
+            var mix = CurrentMix(); double start = Range.Start, end = Range.End;
+            ClosePlayback(); File.Move(path, next, false); path = next; CancelRename(); FileChanged?.Invoke(this, next); await Open(next);
+            loadingMix = true;
+            GameVolume.Value = mix.Game; DiscordVolume.Value = mix.Discord; MicrophoneVolume.Value = mix.Microphone;
+            GameMute.IsChecked = mix.GameMuted; DiscordMute.IsChecked = mix.DiscordMuted; MicrophoneMute.IsChecked = mix.MicrophoneMuted;
+            loadingMix = false; ApplyVolumes(); Range.SetRange(start, end); EditorMessage.Text = "Clip renamed.";
+        }
+        catch (Exception ex) { EditorMessage.Text = ex.Message; await Open(path); }
+    }
+    private void CancelRename() { NameEdit.Visibility = Wpf.Visibility.Collapsed; NameDisplay.Visibility = Wpf.Visibility.Visible; }
+    private void Name_Blurred(object sender, KeyboardFocusChangedEventArgs e) { if (NameEdit.Visibility == Wpf.Visibility.Visible) CancelRename(); }
+    private void ShowOverlay() { PlaybackOverlay.Opacity = 1; PlaybackOverlay.IsHitTestVisible = true; overlayTimer.Stop(); overlayTimer.Start(); }
+    private void HideOverlay() { PlaybackOverlay.Opacity = 0; PlaybackOverlay.IsHitTestVisible = false; }
+    private void Video_Enter(object sender, MouseEventArgs e) => ShowOverlay();
+    private void Video_Move(object sender, MouseEventArgs e) => ShowOverlay();
+    private void Video_Leave(object sender, MouseEventArgs e) { if (!seeking) HideOverlay(); }
+    private void Video_Click(object sender, MouseButtonEventArgs e) { PreviewSurface.Focus(); TogglePlay(); e.Handled = true; }
+    private void Fullscreen_Click(object sender, Wpf.RoutedEventArgs e) => ToggleFullscreen();
+    private void ToggleFullscreen()
+    {
+        if (fullscreen != null) { ExitFullscreen(); return; }
+        if (!opened || Busy) return;
+        fullscreen = new Wpf.Window { Title = "ClipIt · Fullscreen", Background = M.Brushes.Black, WindowStyle = Wpf.WindowStyle.None, ResizeMode = Wpf.ResizeMode.NoResize, ShowInTaskbar = true, Owner = Wpf.Window.GetWindow(this), WindowState = Wpf.WindowState.Maximized };
+        fullscreen.PreviewKeyDown += Editor_KeyDown;
+        fullscreen.Closing += (_, e) => { if (fullscreen != null) { e.Cancel = true; ExitFullscreen(); } };
+        PreviewSlot.Children.Remove(PreviewSurface); fullscreen.Content = PreviewSurface; fullscreen.Show(); fullscreen.Activate(); Keyboard.Focus(PreviewSurface); ShowOverlay();
+    }
+    private void ExitFullscreen()
+    {
+        if (fullscreen == null) return;
+        var window = fullscreen; fullscreen = null;
+        window.Content = null; PreviewSlot.Children.Add(PreviewSurface); window.Close();
+    }
+    private void Editor_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (NameEdit.IsKeyboardFocusWithin) return;
+        if (e.Key == Key.Escape && fullscreen != null) { ExitFullscreen(); e.Handled = true; }
+        else if (e.Key == Key.Space) { TogglePlay(); e.Handled = true; }
+        else if (e.Key == Key.F) { ToggleFullscreen(); e.Handled = true; }
+    }
+    private void Drag_Down(object sender, MouseButtonEventArgs e) => dragStart = e.GetPosition(this);
+    private void Drag_Move(object sender, MouseEventArgs e)
+    {
+        if (Busy || e.LeftButton != MouseButtonState.Pressed || !File.Exists(path)) return;
+        var p = e.GetPosition(this);
+        if (Math.Abs(p.X - dragStart.X) < Wpf.SystemParameters.MinimumHorizontalDragDistance && Math.Abs(p.Y - dragStart.Y) < Wpf.SystemParameters.MinimumVerticalDragDistance) return;
+        Pause(); Wpf.DragDrop.DoDragDrop(DragButton, new Wpf.DataObject(Wpf.DataFormats.FileDrop, new[] { path }), Wpf.DragDropEffects.Copy);
+    }
+    private void ClosePlayback()
+    {
+        Pause(); Player.Close(); opened = false; timer.Stop();
+        for (int i = 0; i < stems.Length; i++) { stems[i].Close(); stemReady[i] = false; }
+        audioPreview?.Dispose(); audioPreview = null;
+    }
+    public void CloseMedia() { ++generation; loading?.Cancel(); ExitFullscreen(); ClosePlayback(); }
+    public void Dispose() { ++generation; loading?.Cancel(); rendering?.Cancel(); overlayTimer.Stop(); CloseMedia(); }
+}

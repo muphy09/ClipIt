@@ -1,0 +1,9 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {"label":"Test App","type":"process","command":"pwsh","args":["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/scripts/Test-App.ps1"],"problemMatcher":[],"group":{"kind":"build","isDefault":true}},
+    {"label":"Push Hotfix","type":"process","command":"pwsh","args":["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/scripts/Publish.ps1","-Kind","Hotfix"],"problemMatcher":[]},
+    {"label":"Push Minor","type":"process","command":"pwsh","args":["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/scripts/Publish.ps1","-Kind","Minor"],"problemMatcher":[]},
+    {"label":"Push Major","type":"process","command":"pwsh","args":["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/scripts/Publish.ps1","-Kind","Major"],"problemMatcher":[]}
+  ]
+}
