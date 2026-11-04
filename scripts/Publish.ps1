@@ -38,8 +38,19 @@ try {
         if (@($runs).Count -gt 0) { $run=$runs[0].databaseId; break }
         Start-Sleep -Seconds 2
     }
-    if (!$run) { throw "Release was pushed, but the workflow has not appeared yet. Check GitHub Actions for $tag; do not bump again to retry." }
-    Invoke-Checked $gh @('run','watch',"$run",'--repo','muphy09/ClipIt','--exit-status')
+    if (!$run) {
+        # GitHub may omit an automatic run when a repository/workflow is first initialized.
+        # Dispatch the same reviewed tag; never invent another version or move the tag.
+        Invoke-Checked $gh @('workflow','run','release.yml','--repo','muphy09/ClipIt','--ref',$tag)
+        for ($attempt=0; $attempt -lt 30; $attempt++) {
+            $runs = & $gh run list --repo muphy09/ClipIt --workflow release.yml --commit $sha --json databaseId --limit 1 | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw 'Could not query the dispatched release workflow.' }
+            if (@($runs).Count -gt 0) { $run=$runs[0].databaseId; break }
+            Start-Sleep -Seconds 2
+        }
+    }
+    if (!$run) { throw "Release was pushed, but its workflow has not appeared yet. Check GitHub Actions for $tag; do not bump again to retry." }
+    Invoke-Checked $gh @('run','watch',"$run",'--repo','muphy09/ClipIt','--exit-status','--interval','10')
     Write-Host "ClipIt $nextVersion is published. Installed clients will find it on startup."
 } catch {
     if ($versionChanged -and !$committed) {
