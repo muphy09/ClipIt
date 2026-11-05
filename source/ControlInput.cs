@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using ComboBox = System.Windows.Controls.ComboBox;
@@ -19,13 +20,35 @@ internal static class ControlInput
 
     private static void ScrollPage(object sender, MouseWheelEventArgs e)
     {
-        // A wheel gesture scrolls the containing page, never the value of a control under the pointer.
+        // An open popup owns the wheel, including when its list is already at either end.
         e.Handled = true;
+        if (sender is ComboBox { IsDropDownOpen: true } combo)
+        {
+            if (combo.Template.FindName("PART_Popup", combo) is Popup { Child: { } child } && FindScrollViewer(child) is { } list)
+                Scroll(list, e.Delta);
+            return;
+        }
+        // Closed controls pass scrolling to the page without editing their selected value.
         for (DependencyObject? parent = (DependencyObject)sender; parent != null; parent = VisualTreeHelper.GetParent(parent))
             if (parent is ScrollViewer viewer)
             {
-                viewer.ScrollToVerticalOffset(viewer.VerticalOffset - e.Delta / 120.0 * SystemParameters.WheelScrollLines * 16);
+                Scroll(viewer, e.Delta);
                 return;
             }
+    }
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject element)
+    {
+        if (element is ScrollViewer viewer) return viewer;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(element); i++)
+            if (FindScrollViewer(VisualTreeHelper.GetChild(element, i)) is { } found) return found;
+        return null;
+    }
+
+    private static void Scroll(ScrollViewer viewer, int delta)
+    {
+        int lines = SystemParameters.WheelScrollLines;
+        double step = lines < 0 ? viewer.ViewportHeight : lines * (viewer.CanContentScroll ? 1 : 16);
+        viewer.ScrollToVerticalOffset(viewer.VerticalOffset - delta / 120.0 * step);
     }
 }
