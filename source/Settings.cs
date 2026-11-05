@@ -21,6 +21,7 @@ public sealed record Settings
     public bool StartWithWindows { get; init; }
     public bool StartMinimized { get; init; }
     public bool Overlay { get; init; } = true;
+    public bool BufferInMemory { get; init; }
     public uint Modifiers { get; init; } = 1; // Alt
     public uint Key { get; init; } = (uint)Keys.B;
     public static string DataDirectory => Environment.GetEnvironmentVariable("CLIPIT_DATA") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClipIt");

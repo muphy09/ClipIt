@@ -118,3 +118,13 @@ A brief desktop-idle sample while the settings window was open measured approxim
 Test settings, captured footage, and logs were kept outside the portable package. Launch the delivered app to begin a fresh recording session with its normal Videos/ClipIt defaults.
 
 
+# Disk-backed replay buffer - November 4, 2026
+
+- Disk is now the default replay storage. Settings has an immediately saved Save replay in RAM toggle; storage changes restart the buffer without changing quality, existing clips or pause state. Detected HDDs warn and recommend RAM or an SSD save folder. Unsupported drive-type queries show an unknown-drive warning.
+- All 53 desktop checks passed, including a full thirty-second disk capture, active disk-to-RAM-to-disk switching, saving four named audio tracks in both modes, and paused storage changes followed by resume. All 12 new disk-buffer checks and all 15 existing media checks passed.
+- Disk saves stream-copy existing encoded packets. Generated-media checks verified exact video/audio packet hashes, complete decoding, aligned track starts, duration bounds, no overwrites, cancellation cleanup, active-session preservation, abandoned-session recovery and preservation of unrelated files.
+- Real native disk recording retained 1080p H.264 High at exactly 60 FPS and four AAC tracks; a 30.9-second saved replay decoded without errors, with all five streams starting at the same timestamp.
+- A paired 1080p60/24 Mbps two-minute comparison measured recorder private working set at 163.3 MiB for disk versus 516.8 MiB for RAM (68% reduction) after 122.8 seconds. This measures recorder processes, not the UI or system file cache. Both full-buffer recordings saved successfully; disk retention was bounded (60 recent segments, about 349 MiB at the sample). Final short MP4 segments preserve native timestamp precision, and buffer file events are excluded from library refreshes.
+- Inspected the running Settings page with disk mode selected. Temporary sessions are under the selected save folder's .clipit-buffer directory and are cleaned after shutdown/recovery. Saved clips continue to use application subfolders and the normal library/editor.
+- HDD warning branches were exercised with controlled drive-type inputs; physical HDD performance and long gaming sessions were not tested. The maximum five-minute setting was covered by configuration checks, not a full five-minute capture.
+

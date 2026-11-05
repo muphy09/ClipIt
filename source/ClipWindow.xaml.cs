@@ -33,6 +33,7 @@ public partial class ClipWindow : Wpf.Window
     private readonly AppUpdates updates = new();
     private readonly RecordingOverlay recordingOverlay = new();
     private readonly CaptureChime captureChime = new();
+    private int driveCheckGeneration;
     private static readonly Media.Brush Blue = Brush("#72AAFF"), Green = Brush("#55D9AB"), Amber = Brush("#F2BC66"), Gray = Brush("#7D91AF");
 
     public ClipWindow()
@@ -57,9 +58,11 @@ public partial class ClipWindow : Wpf.Window
         StartWindowsToggle.IsEnabled = StartupRegistration.Available;
         StartupHint.Text = StartupRegistration.Available ? "Open ClipIt automatically when you sign in." : "Available in the installed app. Development instances stay separate.";
         OverlayToggle.IsChecked = settings.Overlay;
+        RamBufferToggle.IsChecked = settings.BufferInMemory;
         StartWindowsToggle.Checked += GeneralSetting_Changed; StartWindowsToggle.Unchecked += GeneralSetting_Changed;
         StartMinimizedToggle.Checked += GeneralSetting_Changed; StartMinimizedToggle.Unchecked += GeneralSetting_Changed;
         OverlayToggle.Checked += GeneralSetting_Changed; OverlayToggle.Unchecked += GeneralSetting_Changed;
+        RamBufferToggle.Checked += GeneralSetting_Changed; RamBufferToggle.Unchecked += GeneralSetting_Changed;
         recorder = new(settings);
         FolderBox.Text = settings.Folder;
         ShortcutBox.Text = settings.Shortcut.Replace("+", " + ");
@@ -99,6 +102,7 @@ public partial class ClipWindow : Wpf.Window
         CursorToggle.Checked += (_, _) => MarkDirty(); CursorToggle.Unchecked += (_, _) => MarkDirty();
         populating = false;
         ApplyButton.IsEnabled = false;
+        _ = UpdateBufferDriveWarning();
 
         var menu = new Forms.ContextMenuStrip
         {
@@ -256,15 +260,18 @@ public partial class ClipWindow : Wpf.Window
         if (populating) return;
         var previous = settings;
         bool startupChanged = (StartWindowsToggle.IsChecked == true) != settings.StartWithWindows;
+        bool storageChanged = (RamBufferToggle.IsChecked == true) != settings.BufferInMemory;
         try
         {
+            if (storageChanged && (recorder.Saving || library?.Busy == true)) throw new InvalidOperationException("Wait for your clip to finish saving before changing replay storage.");
             var updated = settings with { StartWithWindows = StartWindowsToggle.IsChecked == true,
-                StartMinimized = StartMinimizedToggle.IsChecked == true, Overlay = OverlayToggle.IsChecked == true };
+                StartMinimized = StartMinimizedToggle.IsChecked == true, Overlay = OverlayToggle.IsChecked == true, BufferInMemory = RamBufferToggle.IsChecked == true };
             if (startupChanged) StartupRegistration.Apply(updated.StartWithWindows);
             try { updated.Save(); }
             catch { if (startupChanged) StartupRegistration.Apply(previous.StartWithWindows); throw; }
             settings = updated; recorder.Settings = updated;
-            GeneralSettingsStatus.Text = "Settings saved.";
+            if (storageChanged) recorder.Restart();
+            GeneralSettingsStatus.Text = storageChanged ? "Replay storage saved. A fresh buffer starts when recording is active." : "Settings saved.";
         }
         catch (Exception ex)
         {
@@ -272,11 +279,27 @@ public partial class ClipWindow : Wpf.Window
             StartWindowsToggle.IsChecked = previous.StartWithWindows;
             StartMinimizedToggle.IsChecked = previous.StartMinimized;
             OverlayToggle.IsChecked = previous.Overlay;
+            RamBufferToggle.IsChecked = previous.BufferInMemory;
             populating = false;
             GeneralSettingsStatus.Text = "Could not save settings: " + ex.Message;
         }
         StartMinimizedRow.Visibility = settings.StartWithWindows ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
         recordingOverlay.Update(settings.Overlay, recorder.Recording, settings.Monitor);
+        _ = UpdateBufferDriveWarning();
+    }
+
+    private async Task UpdateBufferDriveWarning()
+    {
+        int generation = ++driveCheckGeneration;
+        BufferDriveWarning.Visibility = Wpf.Visibility.Collapsed;
+        if (settings.BufferInMemory) return;
+        string folder = settings.Folder;
+        var kind = await Task.Run(() => BufferDrive.Detect(folder));
+        if (cleaned || generation != driveCheckGeneration) return;
+        string warning = BufferDrive.Warning(kind);
+        BufferDriveWarningText.Text = warning;
+        BufferDriveWarning.Visibility = warning.Length > 0 ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+        if (kind == BufferDriveKind.HardDisk) Notice(warning, true);
     }
 
     private void Apply_Click(object sender, Wpf.RoutedEventArgs e)
@@ -307,6 +330,7 @@ public partial class ClipWindow : Wpf.Window
             catch { if (changedKey) Win32.UnregisterHotKey(handle, newId); throw; }
             if (changedKey) { if (registered) Win32.UnregisterHotKey(handle, hotkeyId); hotkeyId = newId; registered = true; }
             settings = updated; recorder.Settings = updated; recorder.Restart();
+            _ = UpdateBufferDriveWarning();
             library?.SetFolder(updated.Folder);
             dirty = false; ApplyButton.IsEnabled = false;
             SettingsHint.Text = "Settings saved.";

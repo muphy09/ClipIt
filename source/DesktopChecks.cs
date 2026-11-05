@@ -28,6 +28,8 @@ internal static class DesktopChecks
             {
                 var initial = Settings.Load();
                 Require(initial.Modifiers == 1 && initial.Key == (uint)Keys.B, "New profiles default to Alt+B");
+                Require(!initial.BufferInMemory, "Disk buffering is the default for new and existing profiles");
+                Require(BufferDrive.Warning(BufferDriveKind.HardDisk).Contains("HDD") && BufferDrive.Warning(BufferDriveKind.HardDisk).Contains("RAM") && BufferDrive.Warning(BufferDriveKind.SolidState).Length == 0, "HDD detection warns and recommends RAM; solid-state drives do not show that warning");
                 Require(CaptureQuality.Resolutions(900).SequenceEqual(new[] { 720, 900 }) && CaptureQuality.Resolutions(1440).Last() == 1440 && CaptureQuality.Resolutions(1080).All(h => h <= 1080), "Resolution options include the monitor maximum and exclude larger resolutions");
                 Require(CaptureQuality.RecommendedBitrate(1440, 60) > CaptureQuality.RecommendedBitrate(1080, 60) && CaptureQuality.RecommendedBitrate(1080, 60) > CaptureQuality.RecommendedBitrate(1080, 30), "Suggested bitrate increases with resolution and frame rate");
                 Require(initial.ReplaySeconds == 120, "Existing settings retain the two-minute default");
@@ -99,6 +101,11 @@ internal static class DesktopChecks
                 Require(!((C.CheckBox)window.FindName("StartWindowsToggle")).IsEnabled, "Development instances cannot overwrite installed startup registration");
                 Require(((Wpf.FrameworkElement)window.FindName("StartMinimizedRow")).Visibility == Wpf.Visibility.Visible, "Start minimized is visible when startup is enabled");
                 var overlayToggle = (C.CheckBox)window.FindName("OverlayToggle");
+                var ramToggle = (C.CheckBox)window.FindName("RamBufferToggle");
+                ramToggle.IsChecked = true;
+                Require(Settings.Load().BufferInMemory, "RAM buffer toggle persists immediately");
+                ramToggle.IsChecked = false;
+                Require(!Settings.Load().BufferInMemory, "Disk buffering can be restored without changing capture quality");
                 overlayToggle.IsChecked = false;
                 Require(!Settings.Load().Overlay && Settings.Load().StartMinimized, "Overlay saves immediately while preserving startup preferences");
                 overlayToggle.IsChecked = true;
@@ -141,6 +148,22 @@ internal static class DesktopChecks
                 Require(File.Exists(saved), "Tray-only instance confirms a successfully captured clip");
                 var captured = await MediaTools.Probe(saved, CancellationToken.None);
                 Require(captured.Duration >= 29 && captured.Duration <= 35, "A filled thirty-second replay saves the selected duration with keyframe allowance");
+                saved = ""; ramToggle.IsChecked = true;
+                for (int i = 0; i < 90 && (!supervisor.Recording || supervisor.Seconds < 3); i++) await Task.Delay(500);
+                Require(supervisor.Recording && Settings.Load().BufferInMemory, "Switching an active disk recorder to RAM starts a new recording worker");
+                supervisor.Save();
+                for (int i = 0; i < 90 && saved.Length == 0; i++) await Task.Delay(500);
+                Require(File.Exists(saved) && (await MediaTools.Probe(saved, CancellationToken.None)).HasStems, "RAM mode still saves a playable clip with all four named tracks");
+                saved = ""; ramToggle.IsChecked = false;
+                for (int i = 0; i < 90 && (!supervisor.Recording || supervisor.Seconds < 3); i++) await Task.Delay(500);
+                supervisor.Save();
+                for (int i = 0; i < 90 && saved.Length == 0; i++) await Task.Delay(500);
+                Require(File.Exists(saved) && (await MediaTools.Probe(saved, CancellationToken.None)).HasStems && !Settings.Load().BufferInMemory, "Switching back to disk continues capturing and saves all four named tracks");
+                supervisor.Toggle(); ramToggle.IsChecked = true;
+                Require(!supervisor.Enabled && !supervisor.Recording, "Changing storage while paused preserves the paused state");
+                ramToggle.IsChecked = false; supervisor.Toggle();
+                for (int i = 0; i < 90 && !supervisor.Recording; i++) await Task.Delay(500);
+                Require(supervisor.Recording, "Disk recording resumes normally after a paused storage change");
                 exit = 0;
             }
             catch (Exception ex) { results.Add("FAILED: " + ex); }

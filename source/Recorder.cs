@@ -19,6 +19,8 @@ internal sealed class Recorder : IDisposable
     private bool initialized;
     private bool displayShowing;
     private readonly Obs.Signal savedCallback;
+    private readonly Obs.Signal fileChangedCallback;
+    private DiskReplayBuffer? diskBuffer;
     private int saved;
     private bool saving;
     private DateTime saveRequested;
@@ -37,6 +39,15 @@ internal sealed class Recorder : IDisposable
         this.settings = settings.Validated();
         this.send = send;
         savedCallback = (_, _) => Interlocked.Exchange(ref saved, 1);
+        fileChangedCallback = (_, data) =>
+        {
+            try
+            {
+                var call = Marshal.PtrToStructure<Obs.CallData>(data);
+                if (Obs.calldata_get_string(ref call, "next_file", out var path)) diskBuffer?.FileChanged(Obs.Text(path));
+            }
+            catch (Exception ex) { Log.Write("Replay file change: " + ex.Message); }
+        };
         logCallback = (level, format, args, _) =>
         {
             try
@@ -123,17 +134,24 @@ internal sealed class Recorder : IDisposable
             if (encoder == 0) throw new InvalidOperationException("AAC audio encoder unavailable.");
             audioEncoders.Add(encoder); Obs.obs_encoder_set_audio(encoder, Obs.obs_get_audio());
         }
+        if (!settings.BufferInMemory) diskBuffer = CreateDiskBuffer();
         output = WithData(d =>
         {
+            if (diskBuffer != null)
+            {
+                ConfigureDiskSettings(d);
+                return Obs.obs_output_create("ffmpeg_muxer", "Disk replay", d, 0);
+            }
             Obs.obs_data_set_int(d, "max_time_sec", settings.ReplayBufferSeconds);
             Obs.obs_data_set_int(d, "max_size_mb", (long)Math.Ceiling(Settings.EstimateClipBytes(settings.Bitrate / 1000.0, settings.ReplayBufferSeconds) / 1048576.0 * 1.5) + 64);
             Obs.obs_data_set_string(d, "directory", settings.Folder);
             Obs.obs_data_set_string(d, "format", "ClipIt %CCYY-%MM-%DD %hh-%mm-%ss");
             Obs.obs_data_set_string(d, "extension", "mp4");
             Obs.obs_data_set_bool(d, "allow_spaces", true);
-            return Obs.obs_output_create("replay_buffer", "Two minute replay", d, 0);
+            return Obs.obs_output_create("replay_buffer", "RAM replay", d, 0);
         });
         if (output == 0) throw new InvalidOperationException("Replay buffer component unavailable.");
+        if (diskBuffer != null) Obs.signal_handler_connect(Obs.obs_output_get_signal_handler(output), "file_changed", fileChangedCallback, 0);
         for (int i = 0; i < audioEncoders.Count; i++) Obs.obs_output_set_audio_encoder(output, audioEncoders[i], (nuint)i);
         foreach (var candidate in candidates)
         {
@@ -160,10 +178,30 @@ internal sealed class Recorder : IDisposable
             video = 0;
         }
         if (video == 0) throw new InvalidOperationException("Hardware encoder could not start. Check app.log for details.");
-        Obs.signal_handler_connect(Obs.obs_output_get_signal_handler(output), "saved", savedCallback, 0);
+        if (diskBuffer == null) Obs.signal_handler_connect(Obs.obs_output_get_signal_handler(output), "saved", savedCallback, 0);
         lifetime.Restart();
+        diskBuffer?.StartClock();
         send(new("started", $"{outWidth} × {outHeight} · {settings.Fps} FPS · H.264 · 3 separate audio sources"));
         SendApplication();
+    }
+
+    private DiskReplayBuffer CreateDiskBuffer() => new(settings, message =>
+    {
+        if (message.Type is "saved" or "error") saving = false;
+        send(message);
+    });
+
+    private void ConfigureDiskSettings(nint data)
+    {
+        Obs.obs_data_set_string(data, "path", diskBuffer!.InitialPath);
+        Obs.obs_data_set_string(data, "directory", diskBuffer.DirectoryPath);
+        Obs.obs_data_set_string(data, "format", ".clipit-segment-%CCYY-%MM-%DD-%hh-%mm-%ss");
+        Obs.obs_data_set_string(data, "extension", "mp4");
+        Obs.obs_data_set_bool(data, "split_file", true);
+        Obs.obs_data_set_int(data, "max_time_sec", 2);
+        Obs.obs_data_set_int(data, "max_size_mb", 0);
+        Obs.obs_data_set_bool(data, "allow_overwrite", false);
+        Obs.obs_data_set_bool(data, "allow_spaces", false);
     }
 
     private static void ConfigureProcess(nint data, string token)
@@ -189,8 +227,14 @@ internal sealed class Recorder : IDisposable
         if (Obs.obs_output_active(output)) throw new IOException("Could not switch game capture safely.");
         WithData(d => { ConfigureProcess(d, next.Token); Obs.obs_source_update(gameAudio, d); return 0; });
         game = next; applicationFolder = AppTargets.FolderName(next.Name);
+        if (diskBuffer != null)
+        {
+            diskBuffer.Dispose(); diskBuffer = CreateDiskBuffer();
+            WithData(d => { ConfigureDiskSettings(d); Obs.obs_output_update(output, d); return 0; });
+        }
         if (!Obs.obs_output_start(output)) throw new IOException("Could not restart the replay buffer for the new game.");
         lifetime.Restart(); previousFrames = 0; lastFrame = DateTime.UtcNow;
+        diskBuffer?.StartClock();
         SendApplication();
     }
 
@@ -237,17 +281,23 @@ internal sealed class Recorder : IDisposable
         {
             string directory = Path.Combine(settings.Folder, applicationFolder);
             Directory.CreateDirectory(directory);
-            WithData(d => { Obs.obs_data_set_string(d, "directory", directory); Obs.obs_output_update(output, d); return 0; });
+            if (diskBuffer == null) WithData(d => { Obs.obs_data_set_string(d, "directory", directory); Obs.obs_output_update(output, d); return 0; });
             string probe = Path.Combine(directory, ".clipit-" + Guid.NewGuid().ToString("N"));
             using (File.Create(probe)) { }
             File.Delete(probe);
-            var root = Path.GetPathRoot(settings.Folder);
+            var root = BufferDrive.VolumeRoot(settings.Folder);
             if (!string.IsNullOrEmpty(root) && new DriveInfo(root).AvailableFreeSpace < Settings.EstimateClipBytes(settings.Bitrate / 1000.0, settings.ReplayBufferSeconds) + 128_000_000)
                 throw new IOException("There is not enough free space to save a clip.");
             Obs.CallData cd = default;
             try
             {
-                if (!Obs.proc_handler_call(Obs.obs_output_get_proc_handler(output), "save", ref cd)) throw new IOException("The replay save request failed.");
+                if (diskBuffer != null)
+                {
+                    diskBuffer.Tick();
+                    diskBuffer.Save(Path.Combine(directory, $"ClipIt {DateTime.Now:yyyy-MM-dd HH-mm-ss}-{Guid.NewGuid().ToString("N")[..6]}.mp4"));
+                    if (!Obs.proc_handler_call(Obs.obs_output_get_proc_handler(output), "split_file", ref cd)) throw new IOException("The replay split request failed.");
+                }
+                else if (!Obs.proc_handler_call(Obs.obs_output_get_proc_handler(output), "save", ref cd)) throw new IOException("The replay save request failed.");
             }
             finally { Obs.bfree(cd.Stack); }
             saving = true; saveRequested = DateTime.UtcNow;
@@ -258,6 +308,7 @@ internal sealed class Recorder : IDisposable
 
     public void Tick()
     {
+        diskBuffer?.Tick();
         FollowGame();
         if (Interlocked.Exchange(ref saved, 0) != 0)
         {
@@ -288,12 +339,14 @@ internal sealed class Recorder : IDisposable
         if (!initialized) return;
         if (output != 0)
         {
-            Obs.signal_handler_disconnect(Obs.obs_output_get_signal_handler(output), "saved", savedCallback, 0);
+            if (diskBuffer == null) Obs.signal_handler_disconnect(Obs.obs_output_get_signal_handler(output), "saved", savedCallback, 0);
+            else Obs.signal_handler_disconnect(Obs.obs_output_get_signal_handler(output), "file_changed", fileChangedCallback, 0);
             Obs.obs_output_stop(output);
             var end = Stopwatch.StartNew();
             while (Obs.obs_output_active(output) && end.Elapsed.TotalSeconds < 4) Thread.Sleep(50);
             Obs.obs_output_release(output); output = 0;
         }
+        diskBuffer?.Dispose(); diskBuffer = null;
         for (uint i = 0; i < 4; i++) Obs.obs_set_output_source(i, 0);
         if (displayShowing) Obs.obs_source_dec_showing(display);
         foreach (var source in new[] { display, gameAudio, discord, microphone }) if (source != 0) Obs.obs_source_release(source);
@@ -301,7 +354,7 @@ internal sealed class Recorder : IDisposable
         foreach (var encoder in audioEncoders) Obs.obs_encoder_release(encoder);
         Obs.obs_shutdown();
         initialized = false;
-        GC.KeepAlive(savedCallback); GC.KeepAlive(logCallback);
+        GC.KeepAlive(savedCallback); GC.KeepAlive(fileChangedCallback); GC.KeepAlive(logCallback);
     }
 
     internal static int RunWorker(string pipeName, string settingsJson)

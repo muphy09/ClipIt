@@ -46,6 +46,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private void Watch(object sender, FileSystemEventArgs e)
     {
         if (disposed) return;
+        if (e.FullPath.StartsWith(Path.Combine(folder, ".clipit-buffer") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return;
         try { _ = Dispatcher.BeginInvoke(() => { if (!disposed) { refreshTimer.Stop(); refreshTimer.Start(); } }); }
         catch (InvalidOperationException) { }
     }

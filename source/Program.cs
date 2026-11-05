@@ -13,6 +13,7 @@ internal static class Program
         if (args.Length == 3 && args[0] == "--worker") return Recorder.RunWorker(args[1], args[2]);
         if (args.Length > 0 && args[0] == "--smoke") return Smoke.Run(args);
         if (args.Length == 2 && args[0] == "--media-checks") return MediaChecks.Run(args[1]).GetAwaiter().GetResult();
+        if (args.Length == 2 && args[0] == "--buffer-checks") return BufferChecks.Run(args[1]).GetAwaiter().GetResult();
         if (args.Length == 2 && args[0] == "--desktop-checks") return DesktopChecks.Run(args[1]);
         if (args.Length == 2 && args[0] == "--list-apps") { File.WriteAllText(args[1], System.Text.Json.JsonSerializer.Serialize(AppTargets.List())); return 0; }
         string instance = Environment.UserName;

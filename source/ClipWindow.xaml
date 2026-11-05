@@ -179,7 +179,7 @@
                 </Grid>
               </StackPanel>
             </Border>
-            <Border Style="{StaticResource Card}">
+            <Border Style="{StaticResource Card}" Margin="0,0,0,16">
               <StackPanel>
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <StackPanel Margin="0,0,24,0"><TextBlock Text="Overlay" FontSize="13"/><TextBlock Text="Show recording status in the bottom-right corner of the capture display." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
@@ -187,6 +187,17 @@
                 </Grid>
                 <TextBlock Text="A check means recording; an X means capture is inactive. Flashes green when a clip is saved." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,18,0,0"/>
                 <TextBlock Text="Works over desktop and borderless apps. Some fullscreen games may hide it." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock Text="Replay storage" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,18"/>
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <StackPanel Margin="0,0,24,0"><TextBlock Text="Save replay in RAM" FontSize="13"/><TextBlock Text="Off: buffer on your save drive to reduce memory use. On: keep the replay in memory instead." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
+                  <CheckBox x:Name="RamBufferToggle" Grid.Column="1" Width="44" AutomationProperties.Name="Save replay in RAM"/>
+                </Grid>
+                <TextBlock Text="Changing storage starts a fresh replay buffer. Recording quality and separate audio tracks stay the same." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,14,0,0"/>
+                <Border x:Name="BufferDriveWarning" Visibility="Collapsed" Background="#30251E" CornerRadius="6" Padding="12" Margin="0,14,0,0"><TextBlock x:Name="BufferDriveWarningText" Foreground="#F5CCA0" TextWrapping="Wrap"/></Border>
               </StackPanel>
             </Border>
             <TextBlock x:Name="GeneralSettingsStatus" Text="Changes are saved automatically." Foreground="#95B9E9" TextWrapping="Wrap" Margin="2,18,2,0"/>
