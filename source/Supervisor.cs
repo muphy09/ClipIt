@@ -36,8 +36,8 @@ internal sealed class Supervisor : IDisposable
                 case "started": Recording = true; Status = "Buffer warming up…"; break;
                 case "heartbeat":
                     Recording = true; Seconds = message.Seconds;
-                    Status = Seconds >= 120 ? "Ready · last 2 minutes available" : $"Recording · {Seconds}s of 120s buffered";
-                    if (Seconds >= 60) failures = 0;
+                    Status = Seconds >= Settings.ReplaySeconds ? $"Ready · last {Settings.ReplaySeconds}s available" : $"Recording · {Seconds}s of {Settings.ReplaySeconds}s buffered";
+                    if (Seconds >= Math.Min(60, Settings.ReplaySeconds)) failures = 0;
                     break;
                 case "saving": Saving = true; break;
                 case "saved": case "error": Saving = false; break;

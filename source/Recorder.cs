@@ -125,8 +125,8 @@ internal sealed class Recorder : IDisposable
         }
         output = WithData(d =>
         {
-            Obs.obs_data_set_int(d, "max_time_sec", 122); // Keep at least two minutes between two-second keyframes.
-            Obs.obs_data_set_int(d, "max_size_mb", (long)Math.Ceiling(settings.Bitrate * 122.0 / 8 / 1024 * 1.5) + 64);
+            Obs.obs_data_set_int(d, "max_time_sec", settings.ReplayBufferSeconds);
+            Obs.obs_data_set_int(d, "max_size_mb", (long)Math.Ceiling(Settings.EstimateClipBytes(settings.Bitrate / 1000.0, settings.ReplayBufferSeconds) / 1048576.0 * 1.5) + 64);
             Obs.obs_data_set_string(d, "directory", settings.Folder);
             Obs.obs_data_set_string(d, "format", "ClipIt %CCYY-%MM-%DD %hh-%mm-%ss");
             Obs.obs_data_set_string(d, "extension", "mp4");
@@ -242,7 +242,7 @@ internal sealed class Recorder : IDisposable
             using (File.Create(probe)) { }
             File.Delete(probe);
             var root = Path.GetPathRoot(settings.Folder);
-            if (!string.IsNullOrEmpty(root) && new DriveInfo(root).AvailableFreeSpace < settings.Bitrate * 122L / 8 * 1000 + 128_000_000)
+            if (!string.IsNullOrEmpty(root) && new DriveInfo(root).AvailableFreeSpace < Settings.EstimateClipBytes(settings.Bitrate / 1000.0, settings.ReplayBufferSeconds) + 128_000_000)
                 throw new IOException("There is not enough free space to save a clip.");
             Obs.CallData cd = default;
             try
@@ -280,7 +280,7 @@ internal sealed class Recorder : IDisposable
         if (DateTime.UtcNow - lastFrame > TimeSpan.FromSeconds(15)) throw new IOException("The video encoder stopped producing frames.");
         if (lifetime.Elapsed.TotalSeconds > 20 && (Obs.obs_source_get_width(display) == 0 || Obs.obs_source_get_height(display) == 0))
             throw new IOException("The selected display is unavailable.");
-        send(new("heartbeat", encoderName, Math.Min(120, (int)lifetime.Elapsed.TotalSeconds), frames));
+        send(new("heartbeat", encoderName, Math.Min(settings.ReplaySeconds, (int)lifetime.Elapsed.TotalSeconds), frames));
     }
 
     public void Dispose()

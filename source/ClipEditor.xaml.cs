@@ -31,6 +31,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
 
     public ClipEditor()
     {
+        ControlInput.Install();
         InitializeComponent();
         for (int i = 0; i < stems.Length; i++)
         {
@@ -73,7 +74,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
             settingSeek = true; SeekSlider.Maximum = read.Duration; SeekSlider.Value = 0; settingSeek = false;
             loadingMix = true;
             GameVolume.Value = Math.Clamp(read.Mix.Game, 0, 1); DiscordVolume.Value = Math.Clamp(read.Mix.Discord, 0, 1); MicrophoneVolume.Value = Math.Clamp(read.Mix.Microphone, 0, 1);
-            GameMute.IsChecked = read.Mix.GameMuted; DiscordMute.IsChecked = read.Mix.DiscordMuted; MicrophoneMute.IsChecked = read.Mix.MicrophoneMuted;
+            GameEnabled.IsChecked = !read.Mix.GameMuted; DiscordEnabled.IsChecked = !read.Mix.DiscordMuted; MicrophoneEnabled.IsChecked = !read.Mix.MicrophoneMuted;
             loadingMix = false;
             GameLabel.Text = read.HasStems ? "Game" : "Recorded mix";
             DiscordMixer.IsEnabled = MicrophoneMixer.IsEnabled = read.HasStems;
@@ -95,7 +96,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
         catch (Exception ex) { if (current == generation) { PlayerPlaceholder.Text = "This clip couldn't be prepared."; EditorMessage.Text = ex.Message; } }
     }
 
-    private MixSettings CurrentMix() => new(GameVolume.Value, DiscordVolume.Value, MicrophoneVolume.Value, GameMute.IsChecked == true, DiscordMute.IsChecked == true, MicrophoneMute.IsChecked == true);
+    private MixSettings CurrentMix() => new(GameVolume.Value, DiscordVolume.Value, MicrophoneVolume.Value, GameEnabled.IsChecked != true, DiscordEnabled.IsChecked != true, MicrophoneEnabled.IsChecked != true);
     private void ApplyVolumes()
     {
         if (info == null || GameVolume == null || loadingMix) return;
@@ -156,9 +157,6 @@ public partial class ClipEditor : C.UserControl, IDisposable
     }
     private void Range_Seek(object? sender, double position) { if (opened && !Busy) { Pause(); Seek(position); ShowOverlay(); } }
     private void UpdateRange() { SelectionLabel.Text = "Selected  " + MediaTools.Time(Range.End - Range.Start); RangeLabel.Text = MediaTools.Time(Range.Start) + "  –  " + MediaTools.Time(Range.End); }
-    private void SetStart_Click(object sender, Wpf.RoutedEventArgs e) { if (opened) Range.SetRange(Math.Min(Player.Position.TotalSeconds, Range.End - .1), Range.End); }
-    private void SetEnd_Click(object sender, Wpf.RoutedEventArgs e) { if (opened) Range.SetRange(Range.Start, Math.Max(Range.Start + .1, Player.Position.TotalSeconds)); }
-    private void Reset_Click(object sender, Wpf.RoutedEventArgs e) { if (info != null) { Range.Setup(info.Duration); UpdateRange(); Seek(0); } }
     private async void Trim_Click(object sender, Wpf.RoutedEventArgs e) { if (info != null && Range.End - Range.Start >= .1) await Render(); }
     private async Task Render()
     {
@@ -178,8 +176,8 @@ public partial class ClipEditor : C.UserControl, IDisposable
     }
     private void SetControls(bool enabled)
     {
-        PlayButton.IsEnabled = SeekSlider.IsEnabled = Range.IsEnabled = TrimButton.IsEnabled = ResetButton.IsEnabled = DragButton.IsEnabled = RenameButton.IsEnabled = MarkStartButton.IsEnabled = MarkEndButton.IsEnabled = FullscreenButton.IsEnabled = enabled;
-        GameVolume.IsEnabled = GameMute.IsEnabled = enabled;
+        PlayButton.IsEnabled = SeekSlider.IsEnabled = Range.IsEnabled = TrimButton.IsEnabled = DragButton.IsEnabled = RenameButton.IsEnabled = FullscreenButton.IsEnabled = enabled;
+        GameVolume.IsEnabled = GameEnabled.IsEnabled = enabled;
         DiscordMixer.IsEnabled = MicrophoneMixer.IsEnabled = enabled && info?.HasStems == true;
     }
     private void Cancel_Click(object sender, Wpf.RoutedEventArgs e) => rendering?.Cancel();
@@ -212,7 +210,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
             ClosePlayback(); File.Move(path, next, false); path = next; CancelRename(); FileChanged?.Invoke(this, next); await Open(next);
             loadingMix = true;
             GameVolume.Value = mix.Game; DiscordVolume.Value = mix.Discord; MicrophoneVolume.Value = mix.Microphone;
-            GameMute.IsChecked = mix.GameMuted; DiscordMute.IsChecked = mix.DiscordMuted; MicrophoneMute.IsChecked = mix.MicrophoneMuted;
+            GameEnabled.IsChecked = !mix.GameMuted; DiscordEnabled.IsChecked = !mix.DiscordMuted; MicrophoneEnabled.IsChecked = !mix.MicrophoneMuted;
             loadingMix = false; ApplyVolumes(); Range.SetRange(start, end); EditorMessage.Text = "Clip renamed.";
         }
         catch (Exception ex) { EditorMessage.Text = ex.Message; await Open(path); }

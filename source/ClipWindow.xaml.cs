@@ -31,18 +31,35 @@ public partial class ClipWindow : Wpf.Window
     private DateTime lastRecoveryNotice;
     private ClipLibrary? library;
     private readonly AppUpdates updates = new();
+    private readonly RecordingOverlay recordingOverlay = new();
+    private readonly CaptureChime captureChime = new();
     private static readonly Media.Brush Blue = Brush("#72AAFF"), Green = Brush("#55D9AB"), Amber = Brush("#F2BC66"), Gray = Brush("#7D91AF");
 
     public ClipWindow()
     {
+        ControlInput.Install();
         InitializeComponent();
         Title = "ClipIt " + AppUpdates.Version;
         VersionLabel.Text = "ClipIt " + AppUpdates.Version;
         HeaderVersion.Text = " /  INSTANT REPLAY · " + AppUpdates.Version;
         updates.Changed += UpdateStatus;
-        Loaded += async (_, _) => { UpdateStatus(); await updates.Check(); };
+        Dispatcher.BeginInvoke(new Action(async () => { UpdateStatus(); await updates.Check(); }));
         Height = Math.Max(MinHeight, Math.Min(Height, Wpf.SystemParameters.WorkArea.Height - 40));
         settings = Settings.Load(); modifiers = settings.Modifiers; key = settings.Key;
+        if (StartupRegistration.Available)
+        {
+            try { settings = settings with { StartWithWindows = StartupRegistration.Enabled }; }
+            catch (Exception ex) { Log.Write("Could not read Windows startup: " + ex.Message); }
+        }
+        StartWindowsToggle.IsChecked = settings.StartWithWindows;
+        StartMinimizedToggle.IsChecked = settings.StartMinimized;
+        StartMinimizedRow.Visibility = settings.StartWithWindows ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+        StartWindowsToggle.IsEnabled = StartupRegistration.Available;
+        StartupHint.Text = StartupRegistration.Available ? "Open ClipIt automatically when you sign in." : "Available in the installed app. Development instances stay separate.";
+        OverlayToggle.IsChecked = settings.Overlay;
+        StartWindowsToggle.Checked += GeneralSetting_Changed; StartWindowsToggle.Unchecked += GeneralSetting_Changed;
+        StartMinimizedToggle.Checked += GeneralSetting_Changed; StartMinimizedToggle.Unchecked += GeneralSetting_Changed;
+        OverlayToggle.Checked += GeneralSetting_Changed; OverlayToggle.Unchecked += GeneralSetting_Changed;
         recorder = new(settings);
         FolderBox.Text = settings.Folder;
         ShortcutBox.Text = settings.Shortcut.Replace("+", " + ");
@@ -50,14 +67,19 @@ public partial class ClipWindow : Wpf.Window
         for (int i = 0; i < screens.Length; i++)
         {
             var screen = screens[i];
+            string name = DisplayNames.Get(screen.DeviceName);
             MonitorBox.Items.Add(new DisplayChoice(screen.DeviceName,
-                $"Display {i + 1}{(screen.Primary ? " · Primary" : "")}  /  {screen.Bounds.Width} × {screen.Bounds.Height}"));
+                name.Length > 0 ? $"{name} · {i + 1}" : $"Display {i + 1}", screen.Bounds.Height));
         }
         MonitorBox.SelectedIndex = Math.Max(0, MonitorBox.Items.Cast<DisplayChoice>().ToList().FindIndex(s => s.Id == settings.Monitor));
-        foreach (var height in new[] { 720, 1080, 1440, 2160 }) QualityBox.Items.Add(height + "p");
-        QualityBox.SelectedIndex = Array.IndexOf(new[] { 720, 1080, 1440, 2160 }, settings.Height);
+        RefreshResolutions(settings.Height);
         FpsBox.Items.Add("30 FPS"); FpsBox.Items.Add("60 FPS"); FpsBox.SelectedIndex = settings.Fps == 30 ? 0 : 1;
+        for (int seconds = 30; seconds <= 300; seconds += 30) ReplayLengthBox.Items.Add(ReplayTime(seconds));
+        ReplayLengthBox.SelectedIndex = settings.ReplaySeconds / 30 - 1;
+        ReplayBadge.Text = ReplayTime(settings.ReplaySeconds) + " REPLAY";
+        BufferTime.Text = $"00:00 / {settings.ReplaySeconds / 60:00}:{settings.ReplaySeconds % 60:00}";
         BitrateBox.Text = (settings.Bitrate / 1000.0).ToString("0.###", CultureInfo.InvariantCulture);
+        UpdateEstimatedSize();
         MicToggle.IsChecked = settings.Microphone; CursorToggle.IsChecked = settings.Cursor;
         MicrophoneBox.Items.Add(new AudioDevice(settings.MicrophoneDevice, settings.MicrophoneDevice == "default" ? "System default microphone" : "Saved microphone · checking devices…"));
         MicrophoneBox.SelectedIndex = 0;
@@ -65,10 +87,11 @@ public partial class ClipWindow : Wpf.Window
         RefreshGameApps();
 
         FolderBox.TextChanged += (_, _) => MarkDirty();
-        BitrateBox.TextChanged += (_, _) => MarkDirty();
-        MonitorBox.SelectionChanged += (_, _) => MarkDirty();
-        QualityBox.SelectionChanged += (_, _) => MarkDirty();
-        FpsBox.SelectionChanged += (_, _) => MarkDirty();
+        BitrateBox.TextChanged += (_, _) => { MarkDirty(); UpdateEstimatedSize(); };
+        ReplayLengthBox.SelectionChanged += (_, _) => { MarkDirty(); UpdateEstimatedSize(); };
+        MonitorBox.SelectionChanged += (_, _) => { if (populating) return; RefreshResolutions(SelectedHeight); SuggestBitrate(); MarkDirty(); };
+        QualityBox.SelectionChanged += (_, _) => { SuggestBitrate(); MarkDirty(); };
+        FpsBox.SelectionChanged += (_, _) => { SuggestBitrate(); MarkDirty(); };
         MicToggle.Checked += (_, _) => { MicrophoneBox.IsEnabled = true; MarkDirty(); };
         MicToggle.Unchecked += (_, _) => { MicrophoneBox.IsEnabled = false; MarkDirty(); };
         MicrophoneBox.SelectionChanged += (_, _) => MarkDirty();
@@ -135,15 +158,16 @@ public partial class ClipWindow : Wpf.Window
         LiveLabel.Foreground = color;
         LiveLabel.Text = active ? "RECORDING" : recorder.Enabled ? "RECONNECTING" : "PAUSED";
         SideStatus.Text = active ? "Recording is active" : recorder.Enabled ? "Restoring capture" : "Recording paused";
-        StatusTitle.Text = !recorder.Enabled ? "Take a breather." : !active ? "Getting you back in the game." : recorder.Seconds >= 120 ? "Your last two minutes. Ready." : "You're covered from here.";
-        StatusDescription.Text = !recorder.Enabled ? "Resume whenever you're ready. A fresh buffer starts with you." : !active ? "ClipIt is starting or restoring capture automatically." : recorder.Seconds >= 120 ? "Press your shortcut to keep the moment. Recording keeps going." : "Recording is active. Save any time to keep what's buffered so far.";
-        StatusDescription.ToolTip = recorder.Status;
+        StatusTitle.Text = !recorder.Enabled ? "Take a breather." : !active ? "Getting you back in the game." : recorder.Seconds >= settings.ReplaySeconds ? $"Your last {ReplayTime(settings.ReplaySeconds)}. Ready." : "You're covered from here.";
+        ReplayBadge.Text = ReplayTime(settings.ReplaySeconds) + " REPLAY";
+        StatusTitle.ToolTip = recorder.Status;
+        recordingOverlay.Update(settings.Overlay, active, settings.Monitor);
         SaveClipButton.IsEnabled = active && !recorder.Saving;
         SaveButtonText.Text = recorder.Saving ? "Saving…" : "Save clip";
         PauseButton.Content = recorder.Enabled ? "Pause recording" : "Resume recording";
         trayPause.Text = recorder.Enabled ? "Pause recording" : "Resume recording";
-        BufferDescription.Text = active ? (recorder.Seconds >= 120 ? "Full replay buffer  ·  " + settings.Shortcut.Replace("+", " + ") : "Building your replay buffer") : recorder.Enabled ? "Waiting for capture" : "Replay buffer paused";
-        BufferTime.Text = $"{recorder.Seconds / 60:00}:{recorder.Seconds % 60:00} / 02:00";
+        BufferDescription.Text = active ? (recorder.Seconds >= settings.ReplaySeconds ? "Full replay buffer  ·  " + settings.Shortcut.Replace("+", " + ") : "Building your replay buffer") : recorder.Enabled ? "Waiting for capture" : "Replay buffer paused";
+        BufferTime.Text = $"{recorder.Seconds / 60:00}:{recorder.Seconds % 60:00} / {settings.ReplaySeconds / 60:00}:{settings.ReplaySeconds % 60:00}";
         UpdateBuffer();
         string tooltip = active ? $"ClipIt · {recorder.Seconds}s buffered · {settings.Shortcut}" : recorder.Enabled ? "ClipIt · recovering" : "ClipIt · paused";
         tray.Text = tooltip.Length <= 63 ? tooltip : tooltip[..63];
@@ -151,7 +175,32 @@ public partial class ClipWindow : Wpf.Window
 
     private void UpdateBuffer()
     {
-        if (BufferFill.Parent is Wpf.FrameworkElement p) BufferFill.Width = Math.Max(0, p.ActualWidth * recorder.Seconds / 120.0);
+        if (BufferFill.Parent is Wpf.FrameworkElement p) BufferFill.Width = p.ActualWidth * Math.Clamp((double)recorder.Seconds / settings.ReplaySeconds, 0, 1);
+    }
+
+    private static string ReplayTime(int seconds) => $"{seconds / 60}:{seconds % 60:00}";
+    private int SelectedHeight => QualityBox.SelectedItem is int height ? height : settings.Height;
+    private void RefreshResolutions(int preferred)
+    {
+        if (MonitorBox.SelectedItem is not DisplayChoice display) return;
+        bool previous = populating; populating = true;
+        int[] choices = CaptureQuality.Resolutions(display.Height);
+        QualityBox.Items.Clear();
+        foreach (int height in choices) QualityBox.Items.Add(height);
+        QualityBox.SelectedItem = choices.LastOrDefault(h => h <= preferred, choices[0]);
+        populating = previous;
+    }
+    private void SuggestBitrate()
+    {
+        if (populating || FpsBox.SelectedIndex < 0) return;
+        BitrateBox.Text = (CaptureQuality.RecommendedBitrate(SelectedHeight, FpsBox.SelectedIndex == 0 ? 30 : 60) / 1000.0).ToString("0.###", CultureInfo.InvariantCulture);
+    }
+    private void UpdateEstimatedSize()
+    {
+        if (!double.TryParse(BitrateBox.Text, NumberStyles.Number, CultureInfo.InvariantCulture, out double mbps) || !double.IsFinite(mbps) || mbps < 5 || mbps > 100 || ReplayLengthBox.SelectedIndex < 0)
+        { EstimatedSizeLabel.Text = "Enter a bitrate from 5 to 100 Mbps to estimate file size."; return; }
+        double bytes = Settings.EstimateClipBytes(mbps, (ReplayLengthBox.SelectedIndex + 1) * 30);
+        EstimatedSizeLabel.Text = bytes >= 1_000_000_000 ? $"Estimated file size: ~{bytes / 1_000_000_000:0.00} GB per full clip" : $"Estimated file size: ~{bytes / 1_000_000:0} MB per full clip";
     }
 
     private void OnRecorderMessage(WorkerMessage message)
@@ -178,7 +227,8 @@ public partial class ClipWindow : Wpf.Window
                 LastClipLabel.ToolTip = lastPath;
                 Notice("Clip saved. " + Path.GetFileName(lastPath));
                 Log.Write("Saved clip: " + lastPath);
-                tray.ShowBalloonTip(3500, "ClipIt · Clip saved", Path.GetFileName(lastPath), Forms.ToolTipIcon.Info);
+                captureChime.Play();
+                recordingOverlay.FlashSaved();
                 break;
             case "error": case "notice":
                 Notice(message.Text, message.Type == "error");
@@ -203,6 +253,34 @@ public partial class ClipWindow : Wpf.Window
         SettingsSubtext.Text = "Apply when you're ready. Your current capture continues until then.";
     }
 
+    private void GeneralSetting_Changed(object sender, Wpf.RoutedEventArgs e)
+    {
+        if (populating) return;
+        var previous = settings;
+        bool startupChanged = (StartWindowsToggle.IsChecked == true) != settings.StartWithWindows;
+        try
+        {
+            var updated = settings with { StartWithWindows = StartWindowsToggle.IsChecked == true,
+                StartMinimized = StartMinimizedToggle.IsChecked == true, Overlay = OverlayToggle.IsChecked == true };
+            if (startupChanged) StartupRegistration.Apply(updated.StartWithWindows);
+            try { updated.Save(); }
+            catch { if (startupChanged) StartupRegistration.Apply(previous.StartWithWindows); throw; }
+            settings = updated; recorder.Settings = updated;
+            GeneralSettingsStatus.Text = "Settings saved.";
+        }
+        catch (Exception ex)
+        {
+            populating = true;
+            StartWindowsToggle.IsChecked = previous.StartWithWindows;
+            StartMinimizedToggle.IsChecked = previous.StartMinimized;
+            OverlayToggle.IsChecked = previous.Overlay;
+            populating = false;
+            GeneralSettingsStatus.Text = "Could not save settings: " + ex.Message;
+        }
+        StartMinimizedRow.Visibility = settings.StartWithWindows ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+        recordingOverlay.Update(settings.Overlay, recorder.Recording, settings.Monitor);
+    }
+
     private void Apply_Click(object sender, Wpf.RoutedEventArgs e)
     {
         try
@@ -213,8 +291,9 @@ public partial class ClipWindow : Wpf.Window
             var updated = (settings with
             {
                 Folder = Path.GetFullPath(FolderBox.Text.Trim()), Monitor = ((DisplayChoice)MonitorBox.SelectedItem!).Id,
-                Height = new[] { 720, 1080, 1440, 2160 }[QualityBox.SelectedIndex], Fps = FpsBox.SelectedIndex == 0 ? 30 : 60,
+                Height = SelectedHeight, Fps = FpsBox.SelectedIndex == 0 ? 30 : 60,
                 Bitrate = (int)Math.Round(mbps * 1000), Microphone = MicToggle.IsChecked == true, Cursor = CursorToggle.IsChecked == true,
+                ReplaySeconds = (ReplayLengthBox.SelectedIndex + 1) * 30,
                 MicrophoneDevice = (MicrophoneBox.SelectedItem as AudioDevice)?.Id ?? "default",
                 GameWindow = (GameAppBox.SelectedItem as CaptureApp)?.Token ?? "auto",
                 Modifiers = modifiers, Key = key
@@ -245,25 +324,58 @@ public partial class ClipWindow : Wpf.Window
         e.Handled = true;
         var pressed = e.Key == Key.System ? e.SystemKey : e.Key;
         if (pressed == Key.Tab) { e.Handled = false; return; }
-        if (pressed == Key.Escape) { ShortcutBox.Text = (settings with { Modifiers = modifiers, Key = key }).Shortcut.Replace("+", " + "); Keyboard.ClearFocus(); return; }
+        if (pressed == Key.Escape) { ShowShortcut(); Keyboard.ClearFocus(); return; }
         if (pressed is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) return;
         var mods = Keyboard.Modifiers;
         if (!mods.HasFlag(ModifierKeys.Control) && !mods.HasFlag(ModifierKeys.Alt)) { Notice("Include Ctrl or Alt in your save shortcut.", true); return; }
-        modifiers = (mods.HasFlag(ModifierKeys.Control) ? 2u : 0) | (mods.HasFlag(ModifierKeys.Alt) ? 1u : 0) | (mods.HasFlag(ModifierKeys.Shift) ? 4u : 0);
-        key = (uint)KeyInterop.VirtualKeyFromKey(pressed);
-        ShortcutBox.Text = (settings with { Modifiers = modifiers, Key = key }).Shortcut.Replace("+", " + ");
-        MarkDirty();
+        uint enteredModifiers = (mods.HasFlag(ModifierKeys.Control) ? 2u : 0) | (mods.HasFlag(ModifierKeys.Alt) ? 1u : 0) | (mods.HasFlag(ModifierKeys.Shift) ? 4u : 0) | (mods.HasFlag(ModifierKeys.Windows) ? 8u : 0);
+        SaveShortcut(enteredModifiers, (uint)KeyInterop.VirtualKeyFromKey(pressed));
+    }
+    internal bool SaveShortcut(uint enteredModifiers, uint enteredKey)
+    {
+        int newId = hotkeyId == 1 ? 2 : 1;
+        bool changed = enteredModifiers != settings.Modifiers || enteredKey != settings.Key || !registered;
+        try
+        {
+            var updated = (settings with { Modifiers = enteredModifiers, Key = enteredKey }).Validated();
+            if (changed && !Win32.RegisterHotKey(handle, newId, enteredModifiers | 0x4000, enteredKey))
+                throw new InvalidOperationException("That shortcut is already in use. Your previous shortcut is still active.");
+            try { updated.Save(); }
+            catch { if (changed) Win32.UnregisterHotKey(handle, newId); throw; }
+            if (changed) { if (registered) Win32.UnregisterHotKey(handle, hotkeyId); hotkeyId = newId; registered = true; }
+            settings = updated; recorder.Settings = updated; modifiers = enteredModifiers; key = enteredKey;
+            ShowShortcut();
+            SettingsHint.Text = "Shortcut saved.";
+            SettingsSubtext.Text = dirty ? "Your other capture changes still need Apply settings." : "Your new shortcut is active and will be kept when ClipIt reopens.";
+            return true;
+        }
+        catch (Exception ex) { Notice(ex.Message, true); ShowShortcut(); return false; }
+    }
+    private void ShowShortcut()
+    {
+        ShortcutBox.FontStyle = Wpf.FontStyles.Normal;
+        ShortcutBox.Text = settings.Shortcut.Replace("+", " + ");
+    }
+    private void BeginShortcutInput()
+    {
+        capturingShortcut = true;
+        ShortcutBox.Text = "Input keybind";
+        ShortcutBox.FontStyle = Wpf.FontStyles.Italic;
+    }
+    private void Shortcut_Click(object sender, MouseButtonEventArgs e)
+    {
+        ShortcutBox.Focus(); BeginShortcutInput(); e.Handled = true;
     }
     private void Shortcut_Focused(object sender, KeyboardFocusChangedEventArgs e)
     {
-        capturingShortcut = true;
-        ShortcutBox.SelectAll();
+        BeginShortcutInput();
         SettingsHint.Text = "Press your new shortcut.";
-        SettingsSubtext.Text = "Use Ctrl or Alt with a key. Press Tab to finish, then apply your settings.";
+        SettingsSubtext.Text = "Use Ctrl or Alt with a key. A valid shortcut saves automatically.";
     }
     private void Shortcut_Blurred(object sender, KeyboardFocusChangedEventArgs e)
     {
         capturingShortcut = false;
+        ShowShortcut();
         SettingsHint.Text = dirty ? "You have unsaved changes." : "Make it yours.";
         SettingsSubtext.Text = "Applying capture settings starts a fresh replay buffer.";
     }
@@ -281,14 +393,26 @@ public partial class ClipWindow : Wpf.Window
         library.SetFolder(settings.Folder);
         library.ShowDashboard();
         CapturePanel.Visibility = Wpf.Visibility.Collapsed; LibraryHost.Visibility = Wpf.Visibility.Visible;
+        GeneralSettingsPanel.Visibility = Wpf.Visibility.Collapsed;
+        SettingsNav.Background = SettingsNav.BorderBrush = Media.Brushes.Transparent;
         LibraryNav.Background = Brush("#14294A"); LibraryNav.BorderBrush = Brush("#244876");
         CaptureNav.Background = Media.Brushes.Transparent; CaptureNav.BorderBrush = Media.Brushes.Transparent;
     }
     private void Capture_Click(object sender, Wpf.RoutedEventArgs e)
     {
         library?.PausePlayback(); LibraryHost.Visibility = Wpf.Visibility.Collapsed; CapturePanel.Visibility = Wpf.Visibility.Visible;
+        GeneralSettingsPanel.Visibility = Wpf.Visibility.Collapsed;
+        SettingsNav.Background = SettingsNav.BorderBrush = Media.Brushes.Transparent;
         CaptureNav.Background = Brush("#14294A"); CaptureNav.BorderBrush = Brush("#244876");
         LibraryNav.Background = Media.Brushes.Transparent; LibraryNav.BorderBrush = Media.Brushes.Transparent;
+    }
+    private void Settings_Click(object sender, Wpf.RoutedEventArgs e)
+    {
+        library?.PausePlayback();
+        CapturePanel.Visibility = LibraryHost.Visibility = Wpf.Visibility.Collapsed;
+        GeneralSettingsPanel.Visibility = Wpf.Visibility.Visible;
+        SettingsNav.Background = Brush("#14294A"); SettingsNav.BorderBrush = Brush("#244876");
+        CaptureNav.Background = CaptureNav.BorderBrush = LibraryNav.Background = LibraryNav.BorderBrush = Media.Brushes.Transparent;
     }
     private void RefreshMicrophones_Click(object sender, Wpf.RoutedEventArgs e) => recorder.RefreshMicrophones();
     private void RefreshApps_Click(object sender, Wpf.RoutedEventArgs e) => RefreshGameApps();
@@ -323,7 +447,7 @@ public partial class ClipWindow : Wpf.Window
         // Also expose feedback beside Apply so validation stays visible on short windows.
         if (error) { SettingsHint.Text = "A quick adjustment is needed."; SettingsSubtext.Text = text; }
     }
-    private void ShowSettings() { Show(); if (WindowState == Wpf.WindowState.Minimized) WindowState = Wpf.WindowState.Normal; Activate(); }
+    private void ShowSettings() { ShowInTaskbar = true; Show(); if (WindowState == Wpf.WindowState.Minimized) WindowState = Wpf.WindowState.Normal; Activate(); }
     private void UpdateStatus()
     {
         if (!Dispatcher.CheckAccess()) { _ = Dispatcher.BeginInvoke(UpdateStatus); return; }
@@ -366,10 +490,11 @@ public partial class ClipWindow : Wpf.Window
         SystemEvents.PowerModeChanged -= PowerChanged; SystemEvents.DisplaySettingsChanged -= DisplayChanged;
         recorder.Dispose(); tray.Visible = false; var icon = tray.Icon; var menu = tray.ContextMenuStrip; tray.Dispose(); icon?.Dispose(); menu?.Dispose();
         library?.Dispose();
+        recordingOverlay.Close(); captureChime.Dispose();
     }
     private static Media.Brush Brush(string hex) => (Media.Brush)new Media.BrushConverter().ConvertFromString(hex)!;
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
-    private sealed record DisplayChoice(string Id, string Label) { public override string ToString() => Label; }
+    private sealed record DisplayChoice(string Id, string Label, int Height) { public override string ToString() => Label; }
     private sealed record OwnerWindow(nint Handle) : Forms.IWin32Window;
     private sealed class TrayColors : Forms.ProfessionalColorTable
     {

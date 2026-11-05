@@ -1,3 +1,30 @@
+# Display names - November 4, 2026
+
+- Added monitor model names to the Display dropdown, paired with the display number. Verified the attached Samsung Odyssey monitor name in the running app. Name lookup uses the monitor interface and its EDID, with Windows' device description as fallback. Saved capture-device IDs are unchanged.
+
+# Capture control behavior and shortcuts - November 4, 2026
+
+- Build passed and all 44 desktop checks passed. Added coverage for Alt+B defaults, monitor-limited resolution lists (including nonstandard heights), resolution/FPS bitrate suggestions, manual bitrate preservation on replay-length changes, wheel protection on all six capture dropdowns, immediate shortcut persistence, and conflict rollback.
+- Inspected the running UI: clicking Save shortcut clears its display to italic Input keybind. Entered Alt+N in a disposable profile, confirmed immediate registration/settings persistence, reopened the app and saw Alt+N restored, then pressed Alt+N and verified a completed MP4 and Clip saved feedback.
+- Dropdowns and sliders share wheel protection: wheel gestures scroll their containing page and do not edit control values. The monitor maximum uses its current pixel height; encoding rounds to even dimensions. Suggested bitrate scales with resolution and FPS, while manual values remain editable.
+- New profiles use Alt+B. Existing saved shortcuts are preserved. Test App no longer seeds a different default shortcut.
+
+# Configurable replay length - November 4, 2026
+
+- Final Test App build and launch passed. Inspected the Capture page with the compact Display dropdown, Replay length beside Frame rate, and estimated file size beneath Video bitrate.
+- All 29 desktop checks passed. Added checks for the two-minute default, invalid duration rejection, all ten 30-second increments, restored selection, live size estimates, and applying/persisting both five-minute and thirty-second configurations.
+- Recorded beyond a full thirty-second buffer, verified the heartbeat capped at 30 seconds, and saved a real 31.05-second MP4 (94,763,394 bytes), within the expected keyframe allowance.
+- Buffer retention, memory cap, free-space checks, progress, readiness text and recovery backoff now use the configured duration. Five-minute persistence was checked; a full five-minute recording was not performed.
+
+# Settings, startup, overlay and editor changes - November 4, 2026
+
+- Windows x64 self-contained build passed. NuGet's vulnerability lookup was unavailable in the restricted environment (NU1900); compilation succeeded.
+- All 15 existing media checks passed, including saved mixer settings, source mute isolation/restoration, safe trimming, and original-file preservation.
+- All 17 new desktop checks passed with disposable data, generated recordings, and a temporary registry key. Verified startup command quoting and removal; settings persistence; development startup isolation; conditional Start minimized row; immediate overlay preference saves; enabled audio switch semantics; native overlay click-through/non-activation/taskbar flags; Windows capture exclusion; and overlay hiding.
+- A hidden frontend initialized its hotkey handle, started actual hardware recording, and confirmed a successfully saved MP4 without displaying its main window. Successful save feedback uses a generated chime and overlay flash instead of the saved-clip Windows notification.
+- Inspected the running Capture, Settings and editor pages. Confirmed bottom sidebar Settings navigation, removed capture descriptions, Application Selection label, Save trim beside the range, no mark/reset buttons, enabled source switches, and adjacent rename pencil.
+- No real Windows startup entry was changed by validation. A full Windows sign-out/reboot, an installed-app update during minimized startup, exclusive fullscreen, and game-specific anti-cheat compatibility were not exercised. The overlay is a standard desktop window without injection or graphics hooks; visibility above exclusive fullscreen is not promised.
+
 # ClipIt 0.5 installer/update validation - November 4, 2026
 
 - Windows x64 self-contained release build and all 15 media integration checks passed with Velopack 1.2.161 integrated.

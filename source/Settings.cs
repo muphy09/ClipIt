@@ -9,13 +9,20 @@ public sealed record Settings
     public int Height { get; init; } = 1080;
     public int Fps { get; init; } = 60;
     public int Bitrate { get; init; } = 24000;
+    public int ReplaySeconds { get; init; } = 120;
+    internal int ReplayBufferSeconds => ReplaySeconds + 2; // Allow for two-second keyframes.
+    internal static long EstimateClipBytes(double videoMbps, int seconds) =>
+        (long)Math.Ceiling((videoMbps + .192 * 4) * 1_000_000 / 8 * seconds * 1.01); // Four AAC tracks and container overhead.
     public bool Microphone { get; init; }
     public string MicrophoneDevice { get; init; } = "default";
     public string GameWindow { get; init; } = "auto";
     public string DiscordExecutable { get; init; } = "Discord.exe";
     public bool Cursor { get; init; } = true;
-    public uint Modifiers { get; init; } = 6; // Control + Shift
-    public uint Key { get; init; } = (uint)Keys.F10;
+    public bool StartWithWindows { get; init; }
+    public bool StartMinimized { get; init; }
+    public bool Overlay { get; init; } = true;
+    public uint Modifiers { get; init; } = 1; // Alt
+    public uint Key { get; init; } = (uint)Keys.B;
     public static string DataDirectory => Environment.GetEnvironmentVariable("CLIPIT_DATA") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClipIt");
     public static string FileName => Path.Combine(DataDirectory, "settings.json");
     public static Settings Load()
@@ -43,10 +50,12 @@ public sealed record Settings
     public Settings Validated()
     {
         if (!Path.IsPathFullyQualified(Folder)) throw new ArgumentException("Choose an absolute save folder.");
-        if (Height is not (720 or 1080 or 1440 or 2160) || Fps is not (30 or 60) || Bitrate < 5000 || Bitrate > 100000)
+        if (Height < 2 || Height > 32768 || Height % 2 != 0 || Fps is not (30 or 60) || Bitrate < 5000 || Bitrate > 100000)
             throw new ArgumentException("Invalid recording quality settings.");
         if (Key < 1 || Key > 254 || Modifiers > 15 || (Modifiers & 3) == 0)
             throw new ArgumentException("The shortcut must include Ctrl or Alt.");
+        if (ReplaySeconds < 30 || ReplaySeconds > 300 || ReplaySeconds % 30 != 0)
+            throw new ArgumentException("Replay length must be 30 seconds to 5 minutes, in 30-second steps.");
         return this;
     }
     public void Save()

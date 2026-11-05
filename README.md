@@ -1,6 +1,6 @@
 # ClipIt
 
-A standalone Windows tray app with a two-minute replay buffer, hardware video encoding, a local clip library, and an editor with separate game, Discord and microphone audio. OBS Studio does not need to be installed or running. The complete runtime and media tools are bundled.
+A standalone Windows tray app with a configurable replay buffer, hardware video encoding, a local clip library, and an editor with separate game, Discord and microphone audio. OBS Studio does not need to be installed or running. The complete runtime and media tools are bundled.
 
 ## Install and automatic updates
 
@@ -12,13 +12,25 @@ Offline or failed checks show **Update unavailable - Retry** and leave recording
 
 Recording starts on launch. Close the window to keep recording in the tray; double-click the tray icon to return. The tray menu offers save, pause/resume, restart, Your clips, and quit.
 
-Defaults: **Ctrl+Shift+F10**, a two-minute rolling buffer, primary display at up to **1080p / 60 FPS / 24 Mbps**, and **Videos/ClipIt** as the clip root. The microphone starts off. Apply settings after changing a display, game, microphone, shortcut, quality, or folder. Applying starts a fresh buffer.
+Defaults for new profiles: **Alt+B**, a two-minute rolling buffer, primary display at up to **1080p / 60 FPS / 24 Mbps**, and **Videos/ClipIt** as the clip root. Existing saved shortcuts are preserved. The microphone starts off. Apply settings after changing a display, game, microphone, quality, or folder. Applying starts a fresh buffer.
+
+Click **Save shortcut** to show the italic **Input keybind** prompt, then press a combination containing Ctrl or Alt. Valid shortcuts register and save immediately, without Apply settings or a recorder restart. If another app uses the combination, ClipIt keeps the previous shortcut. Leaving an empty prompt restores the current shortcut. Scrolling over dropdowns or sliders scrolls the page without changing their values.
+
+Choose **Replay length** beside **Frame rate**: 30 seconds to 5 minutes in 30-second steps. Click **Apply settings** to start a fresh buffer at the selected length. Resolution choices stop at the selected monitor's current height, including nonstandard heights such as 900p. Changing resolution or frame rate suggests a new bitrate, which also updates the estimated full-clip file size beneath **Video bitrate**. You can override the bitrate directly; the next resolution or frame-rate change suggests a new value again. Changing replay length preserves your manual bitrate. The size estimate includes all four audio tracks and approximate container overhead. Actual size varies with content and keyframe timing.
+
+## Settings and recording feedback
+
+The **Settings** tab at the bottom of the sidebar saves changes immediately. **Start with Windows** registers ClipIt for the current user's Windows sign-in; it is off by default. When enabled, **Start minimized** appears below it. With that option on, Windows startup begins capture in the system tray without showing the main window. Opening ClipIt manually still opens its window. Installed builds use the stable launcher so automatic updates preserve the startup path. Windows startup registration is disabled in isolated development/test instances to keep them separate from the installed app.
+
+**Overlay** shows a small status badge at the bottom right of the selected capture display: a green check while recording and a red X while inactive, including pause and recovery. It is enabled by default, accepts no mouse input, does not activate or take keyboard focus, and is excluded from Windows capture on supported Windows versions. It is a normal Windows desktop overlay with no game injection, graphics hooks or drivers. Desktop and borderless applications are supported; exclusive fullscreen and other overlays may cover it. No universal anti-cheat compatibility is claimed; individual games still require testing.
+
+The overlay is an icon-only 22 × 22 badge with a 12-point check or X, positioned just above the taskbar clock area. After a clip finishes saving successfully, ClipIt plays a short chime and flashes the enabled badge green. Successful captures do not send a Windows notification. Failed or unavailable saves do not play the success sound.
 
 ## Game, Discord and microphone audio
 
 Each new recording contains four audio tracks: **ClipIt Mix** for normal playback, plus **Game**, **Discord**, and **Microphone** separately. Recording uses per-process audio capture; unrelated system audio is excluded. A disabled microphone produces a silent microphone track.
 
-**Automatic - full-screen game** follows an eligible foreground full-screen application on the selected display and retains that application when you alt-tab. Common browsers, launchers and desktop apps are excluded. This is a window-based heuristic, not a game database. For a windowed game or a missed detection, launch the game, click **Refresh apps**, choose it under **Game & Discord audio**, and Apply. The selection matches the executable across changing window titles and relaunches.
+**Automatic - full-screen game** follows an eligible foreground full-screen application on the selected display and retains that application when you alt-tab. Common browsers, launchers and desktop apps are excluded. This is a window-based heuristic, not a game database. For a windowed game or a missed detection, launch the game, click **Refresh apps**, choose it under **Application Selection**, and Apply. The selection matches the executable across changing window titles and relaunches.
 
 When automatic mode detects a different game, it clears and restarts the replay buffer so the new game's folder does not receive the previous game's footage. Saving continues to capture the selected monitor, including other windows on it; choosing a game changes the audio source and folder naming, not the video capture region.
 
@@ -36,9 +48,9 @@ New recordings create a subfolder for their captured application's executable na
 
 Click a clip to open it. Hover over the preview for play/pause, playback seeking, master preview volume and fullscreen. Click the video to play/pause. Space also toggles playback; F toggles fullscreen and Escape returns. Playback stops at the end of the selected trim range.
 
-Drag the blue range handles to choose what to keep. There are no start/end input boxes. You can also place the playhead and use Set start here or Set end here. Focused handles support arrow keys; Shift increases the step.
+Drag the blue range handles to choose what to keep, then use **Save trim** beside the selected range. Focused handles support arrow keys; Shift increases the step.
 
-The **Audio mixer** changes each source's volume or mute independently during preview. Master preview volume affects listening only. **Save trim** replaces the file with the selected range and the chosen playback mix. The four tracks remain in the file, so you can unmute or change a source again later. Ordinary players and upload services generally use the first playback mix; applications that explicitly read other tracks can access the original separate sources. Muting is not removal of the underlying audio.
+The **Audio mixer** changes each source's volume independently during preview. Source switches start on for unmuted clips; turning a switch off mutes that source. Reopening a previously edited clip preserves its saved mix. Master preview volume affects listening only. **Save trim** replaces the file with the selected range and the chosen playback mix. The four tracks remain in the file, so you can unmute or change a source again later. Ordinary players and upload services generally use the first playback mix; applications that explicitly read other tracks can access the original separate sources. Muting is not removal of the underlying audio.
 
 Older mixed recordings are labeled **Recorded mix**; their individual sources cannot be recovered. For those clips, the game/mix slider affects the already-combined audio and the other source controls are disabled.
 
@@ -50,23 +62,23 @@ Mixer preview decodes three temporary local audio files only when opening a mult
 
 ## Capture and recovery
 
-The default compressed buffer is roughly 370 MB, plus engine/graphics memory. A full replay is approximately 120-122 seconds because of keyframe alignment; saving early keeps the available footage. Save requests are serialized and do not stop recording. Notifications appear after the MP4 is finished.
+The default two-minute compressed buffer is roughly 370 MB, plus engine/graphics memory. Longer replay lengths use more memory. A full replay can include a few extra seconds for keyframe alignment; saving early keeps the available footage. Save requests are serialized and do not stop recording. The confirmation chime and overlay flash happen after the MP4 is finished.
 
 The tray app supervises a separate recording worker and restarts it after an unexpected exit, stopped output, stalled encoder, unavailable display, or missing heartbeat. Retries back off from 2 to 60 seconds. Resume and display changes request a fresh recorder. Intentional Pause remains paused. Recovery loses the unsaved buffer; existing saved clips stay on disk. This does not recover from the entire tray app crashing, and a still-active black/static image cannot always be detected as a failure.
 
-Capture uses Windows Graphics Capture with HDR-to-SDR conversion, hardware H.264, and 48 kHz AAC at 192 kbps per track. A supported NVIDIA, AMD or Intel hardware encoder and current drivers are required. Recording refuses CPU video encoding. A Microsoft Visual C++ x64 runtime may be required on another PC. This portable build is unsigned and does not configure automatic sign-in startup. Protected content cannot be promised to record. Long gaming sessions, exclusive fullscreen games, headset changes and performance still need testing in your setup.
+Capture uses Windows Graphics Capture with HDR-to-SDR conversion, hardware H.264, and 48 kHz AAC at 192 kbps per track. A supported NVIDIA, AMD or Intel hardware encoder and current drivers are required. Recording refuses CPU video encoding. A Microsoft Visual C++ x64 runtime may be required on another PC. This build is unsigned; automatic sign-in startup is opt-in under Settings. Protected content cannot be promised to record. Long gaming sessions, exclusive fullscreen games, headset changes and performance still need testing in your setup.
 
 Settings and rotating logs are local at `%LOCALAPPDATA%/ClipIt/`. No account or upload feature is included.
 
 ## Develop and release
 
-The working repository is `C:\dev\ClipIt`. Open that folder in VS Code. Install .NET 10 SDK, Git, PowerShell 7, and GitHub CLI; sign in to GitHub CLI once with `gh auth login` if not already authenticated. No GitHub credentials are embedded in the installed app.
+The working repository is `C:\dev\ClipIt`. Open that folder in VS Code. Install .NET 10 SDK, Git, and GitHub CLI; sign in to GitHub CLI once with `gh auth login` if not already authenticated. VS Code tasks use the full path to Windows' built-in PowerShell, so PowerShell 7 is not required. No GitHub credentials are embedded in the installed app.
 
 Run **Terminal > Run Task**:
 
 | Task | Behavior |
 | --- | --- |
-| Test App | Builds and launches a separate development instance. Uses `.local/dev-data` and `.local/dev-clips`; never replaces or stops the installed app. Shortcut defaults to Ctrl+Alt+F8. |
+| Test App | Builds and launches a separate development instance. Uses `.local/dev-data` and `.local/dev-clips`; never replaces or stops the installed app. New profiles default to Alt+B; existing saved shortcuts are preserved. |
 | Push Hotfix | Increments patch: 0.5.0 to 0.5.1. |
 | Push Minor | Increments minor and resets patch: 0.5.1 to 0.6.0. |
 | Push Major | Increments major and resets minor/patch: 0.6.1 to 1.0.0. |

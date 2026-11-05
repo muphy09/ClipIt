@@ -25,14 +25,14 @@ internal sealed class AppUpdates : IDisposable
         return new UpdateManager(new GithubSource(Repository, null, false), new UpdateOptions { ExplicitChannel = "win" });
     }
 
-    internal static bool ApplyPendingOnStartup()
+    internal static bool ApplyPendingOnStartup(bool windowsStartup = false)
     {
         try
         {
             var manager = CreateManager();
             if (!manager.IsInstalled || manager.UpdatePendingRestart is not { } pending) return false;
             Log.Write("Applying downloaded update on startup: " + pending.Version);
-            manager.WaitExitThenApplyUpdates(pending, silent: false, restart: true);
+            manager.WaitExitThenApplyUpdates(pending, silent: windowsStartup, restart: true, restartArgs: windowsStartup ? ["--windows-startup"] : []);
             return true;
         }
         catch (Exception ex) { Log.Write("Startup update could not apply; continuing with current app: " + ex); return false; }
