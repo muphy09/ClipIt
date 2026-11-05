@@ -27,7 +27,7 @@ public partial class ClipWindow : Wpf.Window
     private int hotkeyId = 1;
     private bool registered, quitting, restartRequested, dirty, populating = true;
     private bool capturingShortcut;
-    private string lastPath = "", encodingDescription = "";
+    private string lastPath = "";
     private DateTime lastRecoveryNotice;
     private ClipLibrary? library;
     private readonly AppUpdates updates = new();
@@ -104,15 +104,14 @@ public partial class ClipWindow : Wpf.Window
         {
             BackColor = System.Drawing.Color.FromArgb(17, 26, 41), ForeColor = System.Drawing.Color.FromArgb(224, 234, 249),
             Font = new System.Drawing.Font("Segoe UI", 10), ShowImageMargin = false,
-            Renderer = new Forms.ToolStripProfessionalRenderer(new TrayColors()), Padding = new Forms.Padding(5)
+            Renderer = new TrayRenderer(), Padding = new Forms.Padding(5)
         };
+        menu.Items.Add("Open ClipIt", null, (_, _) => ShowSettings());
         menu.Items.Add("Save clip", null, (_, _) => recorder.Save());
         menu.Items.Add("Your clips", null, (_, _) => ShowLibrary());
         menu.Items.Add("Open clips folder", null, (_, _) => OpenFolder());
-        menu.Items.Add("Open ClipIt", null, (_, _) => ShowSettings());
         trayPause = new Forms.ToolStripMenuItem("Pause recording", null, (_, _) => recorder.Toggle());
         menu.Items.Add(trayPause);
-        menu.Items.Add("Restart recorder", null, (_, _) => recorder.Restart());
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("Quit ClipIt", null, (_, _) => Quit());
         foreach (Forms.ToolStripItem item in menu.Items) item.Padding = new Forms.Padding(10, 6, 10, 6);
@@ -217,7 +216,6 @@ public partial class ClipWindow : Wpf.Window
                 MicrophoneBox.SelectedItem = devices.First(d => d.Id == selected); populating = wasPopulating;
                 break;
             case "started":
-                encodingDescription = message.Text;
                 MonitorBox.ToolTip = message.Text;
                 break;
             case "saved":
@@ -433,11 +431,6 @@ public partial class ClipWindow : Wpf.Window
     private void Minimize_Click(object sender, Wpf.RoutedEventArgs e) => WindowState = Wpf.WindowState.Minimized;
     private void Maximize_Click(object sender, Wpf.RoutedEventArgs e) => WindowState = WindowState == Wpf.WindowState.Maximized ? Wpf.WindowState.Normal : Wpf.WindowState.Maximized;
     private void Hide_Click(object sender, Wpf.RoutedEventArgs e) => Hide();
-    private void Help_Click(object sender, Wpf.RoutedEventArgs e)
-    {
-        Notice($"{settings.Shortcut.Replace("+", " + ")} saves your replay from any app. Close this window to keep ClipIt in the tray; double-click its icon to return. Right-click the tray icon to quit. " +
-            (encodingDescription.Length > 0 ? "Current capture: " + encodingDescription + ". " : "") + "Clips stay on this PC. Protected content may be unavailable.");
-    }
     private void Notice(string text, bool error = false)
     {
         NoticeText.Text = text; NoticeText.Foreground = error ? Brush("#F5CCA0") : Brush("#B5D3FC");
@@ -496,6 +489,16 @@ public partial class ClipWindow : Wpf.Window
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
     private sealed record DisplayChoice(string Id, string Label, int Height) { public override string ToString() => Label; }
     private sealed record OwnerWindow(nint Handle) : Forms.IWin32Window;
+    private sealed class TrayRenderer : Forms.ToolStripProfessionalRenderer
+    {
+        public TrayRenderer() : base(new TrayColors { UseSystemColors = false }) { }
+        protected override void OnRenderItemText(Forms.ToolStripItemTextRenderEventArgs e)
+        {
+            var color = !e.Item.Enabled ? System.Drawing.Color.FromArgb(125, 145, 175)
+                : e.Item.Selected || e.Item.Pressed ? System.Drawing.Color.White : System.Drawing.Color.FromArgb(224, 234, 249);
+            Forms.TextRenderer.DrawText(e.Graphics, e.Text, e.TextFont, e.TextRectangle, color, e.TextFormat);
+        }
+    }
     private sealed class TrayColors : Forms.ProfessionalColorTable
     {
         public override System.Drawing.Color ToolStripDropDownBackground => System.Drawing.Color.FromArgb(17, 26, 41);
@@ -503,6 +506,11 @@ public partial class ClipWindow : Wpf.Window
         public override System.Drawing.Color ImageMarginGradientMiddle => ToolStripDropDownBackground;
         public override System.Drawing.Color ImageMarginGradientEnd => ToolStripDropDownBackground;
         public override System.Drawing.Color MenuItemSelected => System.Drawing.Color.FromArgb(31, 57, 94);
+        public override System.Drawing.Color MenuItemSelectedGradientBegin => MenuItemSelected;
+        public override System.Drawing.Color MenuItemSelectedGradientEnd => MenuItemSelected;
+        public override System.Drawing.Color MenuItemPressedGradientBegin => MenuItemSelected;
+        public override System.Drawing.Color MenuItemPressedGradientMiddle => MenuItemSelected;
+        public override System.Drawing.Color MenuItemPressedGradientEnd => MenuItemSelected;
         public override System.Drawing.Color MenuItemBorder => System.Drawing.Color.FromArgb(53, 94, 150);
         public override System.Drawing.Color MenuBorder => System.Drawing.Color.FromArgb(41, 59, 85);
         public override System.Drawing.Color SeparatorDark => System.Drawing.Color.FromArgb(41, 59, 85);
