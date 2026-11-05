@@ -19,7 +19,7 @@
           <TextBlock x:Name="PlayerPlaceholder" Text="Loading your clip…" Foreground="#839DBE" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
           <Border x:Name="PlaybackOverlay" Background="#E6142032" VerticalAlignment="Bottom" Padding="14,10" Margin="8" CornerRadius="8" Opacity="0">
             <StackPanel>
-              <Slider x:Name="SeekSlider" Minimum="0" Maximum="1" IsMoveToPointEnabled="True" ValueChanged="Seek_Changed" PreviewMouseLeftButtonDown="Seek_Down" PreviewMouseLeftButtonUp="Seek_Up" AutomationProperties.Name="Playback position"/>
+              <Slider x:Name="SeekSlider" Minimum="0" Maximum="1" IsMoveToPointEnabled="False" ValueChanged="Seek_Changed" PreviewMouseLeftButtonDown="Seek_Down" PreviewMouseMove="Seek_Move" PreviewMouseLeftButtonUp="Seek_Up" LostMouseCapture="Seek_LostCapture" AutomationProperties.Name="Playback position"/>
               <Grid Margin="0,5,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <Button x:Name="PlayButton" Content="Play" Width="62" Click="Play_Click" Padding="8,7"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0"><TextBlock x:Name="PositionLabel" Text="00:00.00" FontFamily="Consolas" Foreground="#B6D4FF"/><TextBlock Text=" / " Foreground="#617C9E"/><TextBlock x:Name="DurationLabel" Text="00:00.00" Foreground="#93A9C8" FontFamily="Consolas"/></StackPanel>

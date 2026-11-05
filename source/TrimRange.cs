@@ -20,6 +20,7 @@ public sealed class TrimRange : C.Canvas
     public event EventHandler? RangeChanged;
     public event EventHandler<double>? SeekRequested;
     private double position;
+    private bool scrubbing;
     public TrimRange()
     {
         Height = 58; Background = M.Brushes.Transparent;
@@ -33,9 +34,30 @@ public sealed class TrimRange : C.Canvas
             if (Duration <= 0) return;
             double x = e.GetPosition(this).X;
             if (Math.Abs(x - X(Start)) < 10 || Math.Abs(x - X(End)) < 10) return;
-            SeekRequested?.Invoke(this, Math.Clamp((x - 8) / Math.Max(1, ActualWidth - 16) * Duration, 0, Duration));
+            if (!CaptureMouse()) return;
+            scrubbing = true;
+            SeekAt(x);
+            e.Handled = true;
         };
+        MouseMove += (_, e) =>
+        {
+            if (!scrubbing) return;
+            if (e.LeftButton != MouseButtonState.Pressed) { EndScrub(); return; }
+            SeekAt(e.GetPosition(this).X); e.Handled = true;
+        };
+        MouseLeftButtonUp += (_, e) =>
+        {
+            if (!scrubbing) return;
+            SeekAt(e.GetPosition(this).X); EndScrub(); e.Handled = true;
+        };
+        LostMouseCapture += (_, _) => scrubbing = false;
     }
+    private void SeekAt(double x)
+    {
+        double next = Math.Clamp((x - 8) / Math.Max(1, ActualWidth - 16) * Duration, 0, Duration);
+        SetPosition(next); SeekRequested?.Invoke(this, next);
+    }
+    private void EndScrub() { scrubbing = false; if (IsMouseCaptured) ReleaseMouseCapture(); }
     public void Setup(double duration) { Duration = duration; Start = 0; End = duration; Layout(); }
     public void SetRange(double start, double end)
     {

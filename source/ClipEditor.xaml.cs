@@ -147,8 +147,39 @@ public partial class ClipEditor : C.UserControl, IDisposable
         Range.SetPosition(position); PositionLabel.Text = MediaTools.Time(position);
     }
     private void Seek_Changed(object sender, Wpf.RoutedPropertyChangedEventArgs<double> e) { if (!settingSeek && opened && !Busy) Seek(e.NewValue); }
-    private void Seek_Down(object sender, MouseButtonEventArgs e) { seeking = true; resumeAfterSeek = playing; Pause(); }
-    private void Seek_Up(object sender, MouseButtonEventArgs e) { seeking = false; if (resumeAfterSeek && opened && !Busy) StartPlayback(); resumeAfterSeek = false; }
+    private void Seek_Down(object sender, MouseButtonEventArgs e)
+    {
+        if (!opened || Busy || !SeekSlider.CaptureMouse()) return;
+        seeking = true; resumeAfterSeek = playing; Pause();
+        SeekToPointer(e); e.Handled = true;
+    }
+    private void Seek_Move(object sender, MouseEventArgs e)
+    {
+        if (!seeking) return;
+        if (e.LeftButton != MouseButtonState.Pressed) { EndSeek(); return; }
+        SeekToPointer(e); ShowOverlay(); e.Handled = true;
+    }
+    private void Seek_Up(object sender, MouseButtonEventArgs e)
+    {
+        if (!seeking) return;
+        SeekToPointer(e); EndSeek(); e.Handled = true;
+    }
+    private void Seek_LostCapture(object sender, MouseEventArgs e) => EndSeek();
+    private void SeekToPointer(MouseEventArgs e)
+    {
+        if (SeekSlider.Template.FindName("PART_Track", SeekSlider) is not System.Windows.Controls.Primitives.Track track) return;
+        double halfThumb = (track.Thumb?.ActualWidth ?? 0) / 2;
+        double fraction = Math.Clamp((e.GetPosition(track).X - halfThumb) / Math.Max(1, track.ActualWidth - halfThumb * 2), 0, 1);
+        SeekSlider.Value = SeekSlider.Minimum + fraction * (SeekSlider.Maximum - SeekSlider.Minimum);
+    }
+    private void EndSeek()
+    {
+        if (!seeking) return;
+        seeking = false;
+        bool resume = resumeAfterSeek; resumeAfterSeek = false;
+        if (SeekSlider.IsMouseCaptured) SeekSlider.ReleaseMouseCapture();
+        if (resume && opened && !Busy && IsVisible) StartPlayback();
+    }
     private void Range_Changed(object? sender, EventArgs e)
     {
         if (info == null) return;
@@ -256,6 +287,8 @@ public partial class ClipEditor : C.UserControl, IDisposable
     }
     private void ClosePlayback()
     {
+        seeking = resumeAfterSeek = false;
+        if (SeekSlider.IsMouseCaptured) SeekSlider.ReleaseMouseCapture();
         Pause(); Player.Close(); opened = false; timer.Stop();
         for (int i = 0; i < stems.Length; i++) { stems[i].Close(); stemReady[i] = false; }
         audioPreview?.Dispose(); audioPreview = null;
