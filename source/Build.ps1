@@ -46,7 +46,16 @@ if ((Get-FileHash -LiteralPath $ObsArchive -Algorithm SHA256).Hash -ne $expected
 $runtime = Join-Path $buildRoot 'obs'
 if (!(Test-Path (Join-Path $runtime 'bin\64bit\obs.dll'))) { Expand-Archive -LiteralPath $ObsArchive -DestinationPath $runtime -Force }
 if (!$Version) { [xml]$project = Get-Content (Join-Path $PSScriptRoot 'ClipIt.csproj'); $Version = $project.Project.PropertyGroup.Version }
-dotnet publish (Join-Path $PSScriptRoot 'ClipIt.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false "-p:Version=$Version" -o $Output
+$projectPath = Join-Path $PSScriptRoot 'ClipIt.csproj'
+# Editor/design-time restores use source/obj and can replace the Windows runtime
+# assets during a publish. Keep packaging intermediates separate and restore the
+# exact publish configuration explicitly before compiling it.
+# Force restore on each run: WPF's temporary compilation project can also leave
+# a non-runtime assets file behind in this cache after a successful build.
+$artifactsPath = Join-Path $buildRoot 'dotnet-publish'
+dotnet restore $projectPath -r win-x64 --force --artifacts-path $artifactsPath -p:Configuration=Release -p:SelfContained=true -p:PublishSingleFile=false "-p:Version=$Version"
+if ($LASTEXITCODE -ne 0) { throw 'Could not restore the Windows x64 publishing dependencies.' }
+dotnet publish $projectPath -c Release -r win-x64 --self-contained true --no-restore --artifacts-path $artifactsPath -p:PublishSingleFile=false "-p:Version=$Version" -o $Output
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 $mediaTarget = Join-Path $Output 'tools'
 New-Item -ItemType Directory -Force $mediaTarget | Out-Null

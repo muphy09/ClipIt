@@ -177,3 +177,10 @@ Test settings, captured footage, and logs were kept outside the portable package
 - Settings heading is Replay Buffer. RAM description is Buffer the replay in RAM instead of on disk. The storage note is Warning: Will increase RAM usage. Recommended only if the disk you are saving to is a HDD.
 - Build succeeded and all 70 existing focused interface checks passed. Results: .local/tray-wording-checks/desktop-check-results.json. Updated the isolated development build; no release published.
 - Also applied balanced padding and a separate 16-pixel right margin to the clip editor's Your Clips back button, so its hover outline stops before the filename. Updated its capitalization to match navigation.
+
+# Publish dependency-cache fix - November 6, 2026
+
+- Build.ps1 now explicitly restores Windows x64/self-contained Release dependencies with --force, then publishes with --no-restore using the same configuration. Publish intermediates live under the selected BuildRoot/dotnet-publish instead of source/obj, separating them from editor and normal command-line restores.
+- Inspected a successful WPF build's assets: its temporary _wpftmp project can leave a non-runtime project.assets.json behind. Forcing the next restore prevents this leftover cache from triggering NETSDK1047. The original failure was intermittent; its exact timing was not reproduced.
+- Validated the updated script twice under Windows PowerShell 5.1, matching the VS Code Publish task. The first run also overlapped a regular source-project restore without a runtime target; both publish builds succeeded as version 0.5.7 into isolated validation folders. Confirmed the standalone runtime and version metadata, and all 15 media checks passed on the first build.
+- No Publish.ps1 run, release commit, tag, push, installer publication, or project version change was performed. The user can retry Push Hotfix with the corrected shared build script.
