@@ -1,3 +1,10 @@
+# Disk replay save latency - November 6, 2026
+
+- Windows self-contained build passed with no warnings or errors. All 19 buffer checks and 15 media checks passed, including delayed file finalization, repeated indexed saves, multitrack decoding, safe cancellation, and shutdown during pending inspection/export.
+- Completed segments are indexed once by a single background worker with a bounded queue. Saves reuse retained timing results. Save events/completion are polled every 50 ms, while recorder health checks and application discovery remain at one-second intervals.
+- The same two-minute/60-segment/approximately 367 MB fixture exported in 1.469–1.813 seconds with cached timings, versus 5.123–5.329 seconds before. The first optimized export has the same SHA-256 as the original export. These are export-component timings, excluding keyframe wait and the UI chime.
+- Live 35-second diagnostic attempts using both the default display and the configured DISPLAY2 stopped at the existing selected-display-unavailable check before reaching save. Live hotkey-to-chime latency remains for user testing. No installed settings were changed or release published. The test build is `.local/latency-fixed`; the usual Test App task rebuilds and launches the updated source with development settings.
+
 # Display names - November 4, 2026
 
 - Added monitor model names to the Display dropdown, paired with the display number. Verified the attached Samsung Odyssey monitor name in the running app. Name lookup uses the monitor interface and its EDID, with Windows' device description as fallback. Saved capture-device IDs are unchanged.
@@ -128,3 +135,45 @@ Test settings, captured footage, and logs were kept outside the portable package
 - Inspected the running Settings page with disk mode selected. Temporary sessions are under the selected save folder's .clipit-buffer directory and are cleaned after shutdown/recovery. Saved clips continue to use application subfolders and the normal library/editor.
 - HDD warning branches were exercised with controlled drive-type inputs; physical HDD performance and long gaming sessions were not tested. The maximum five-minute setting was covered by configuration checks, not a full five-minute capture.
 
+
+# Clip library tabs and file actions - November 6, 2026
+
+- Added Recent and By Game tabs. Game folders sort alphabetically, use existing top-level capture folders (including Desktop), and show newest-first clips when opened. Root imports appear in Unsorted; nested exports keep their top-level game.
+- New disk and RAM saves begin with the captured application name or Desktop, followed by the date/time and a uniqueness suffix. Existing files are not renamed.
+- Import and drag-over checks reject clips already anywhere under the library root, while external MP4 imports remain copies and preserve originals.
+- Right-click Copy uses a file clipboard payload; Delete sends the selected file to the Recycle Bin. Both actions use the app's dark menu theme.
+- All 14 isolated library checks passed, covering grouping, sorting, navigation, nested paths, duplicate prevention, external import, clipboard Copy, selected-file deletion, and filename generation. Rendered Recent and By Game at 1000 x 720 and visually reviewed both layouts.
+- All 55 desktop checks passed, including live application-prefixed filenames in disk and RAM modes, full thirty-second replay duration, separate audio tracks, and active storage switching. The explicit test application is __clipit_no_game__; the Desktop fallback is covered by filename-generation checks.
+- Validation artifacts: .local/library-checks/library-check-results.json and .local/library-desktop-final/desktop-check-results.json. No release was published.
+
+# Capture wording and Your Clips shortcut - November 6, 2026
+
+- Updated Capture labels to Save Location, Capture & Quality, and Capture shortcut. The sidebar now shows Replay Length using the applied duration; the top-right Capture replay badge is removed.
+- Status title uses Replay buffer is building while filling or reconnecting, Recording is active. Last [duration] ready for capture. when full, and Recording has been paused. when paused. Durations support seconds, minutes, and mixed lengths with singular/plural units; long text wraps within the card.
+- Added a separately configurable Your Clips global shortcut, default Alt+Shift+B. It saves immediately and opens Recent, restoring windows hidden to the tray or minimized. Both shortcut editors suppress capture/navigation while entering a binding. Failed registration or saving retains the previous shortcut, and capture/library collisions are rejected.
+- All 67 desktop checks passed, including status wording across durations, sidebar length, immediate shortcut persistence, conflict preservation, native global registration, hidden/minimized library restoration, disk/RAM capture, and recording lifecycle. Results: .local/status-shortcut-checks/desktop-check-results.json.
+- Built and relaunched the isolated development app. Visually checked the Capture labels and sidebar, and used the real Alt+Shift+B chord to open Your clips on Recent. Left the development app on Capture with recording running. No release published.
+# Patch notes viewer - November 6, 2026
+
+- Added Settings > Patch Notes and a small, resizable, scrollable window using the app's shared dark theme. Repeated clicks activate the existing viewer; Close and Escape dismiss it.
+- Root `patchnotes` is copied to build and publish output. The viewer formats Markdown headings, bullet lists, wrapped items, and plain paragraphs; empty or unavailable files show a friendly message. The initial file contains the requested sample.
+- Standalone build passed. All 72 isolated desktop checks passed, including five new checks for formatting, file packaging, opening a single owned viewer, and reopening after close. Results: `.local/patchnotes-results/desktop-check-results.json`.
+- Package vulnerability lookup was unavailable during publish (NU1900); compilation and desktop checks succeeded. No release published.
+
+
+# Capture warnings and pending settings - November 6, 2026
+
+- Capture notices now sit beneath the relevant section: recording status, Capture & Quality, Save Location, Application Selection, or Audio & cursor. Folder and shortcut validation use Save Location; invalid bitrate uses Capture & Quality. Errors can scroll into view on the Capture page.
+- Shortcut warnings clear on blur, Escape, a fresh entry attempt, or a successful binding. Leaving Capture clears notices so canceled shortcut errors do not reappear after visiting Your Clips. Shortcut changes continue to save immediately.
+- The Apply settings bar is collapsed until the Capture form differs from its saved baseline, displays Changes have been made, and collapses after Apply or when edits are reverted. Collapsing removes the reserved footer space. Immediate shortcut and Settings changes do not create pending Capture edits.
+- Updated the motto to Finally something that works, capitalized Your Clips, and added a left-aligned template specifically for Capture and Your Clips navigation. Settings retains its existing alignment.
+- All 70 focused interface checks passed via --capture-ui-checks, including correct warning placement, clearing on blur and navigation, revert detection, immediate shortcut saving, applying changes, and existing settings/shortcut checks. Results: .local/inline-warning-checks/desktop-check-results.json. This focused run skips live recording-duration checks because recording behavior was not changed.
+- Visually checked the running development app, entered an unmodified shortcut to see the warning directly below Save Location, clicked away to clear it, edited bitrate to reveal the Apply bar, and reverted to hide it. Restored the original bitrate without applying; recording remains active. No release published.
+
+# Library back-button spacing and replay wording - November 6, 2026
+
+- All Games uses balanced internal padding plus a separate 16-pixel right margin, keeping its hover outline away from the game title.
+- Tray tooltip now reads ClipIt - Active/Inactive - [current capture shortcut], with spaced shortcut separators. Paused and unavailable recording both show Inactive.
+- Settings heading is Replay Buffer. RAM description is Buffer the replay in RAM instead of on disk. The storage note is Warning: Will increase RAM usage. Recommended only if the disk you are saving to is a HDD.
+- Build succeeded and all 70 existing focused interface checks passed. Results: .local/tray-wording-checks/desktop-check-results.json. Updated the isolated development build; no release published.
+- Also applied balanced padding and a separate 16-pixel right margin to the clip editor's Your Clips back button, so its hover outline stops before the filename. Updated its capitalization to match navigation.

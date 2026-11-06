@@ -4,7 +4,7 @@
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <Grid Margin="0,0,0,14">
       <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <Button x:Name="BackButton" Content="‹  Your clips" Style="{StaticResource Quiet}" Click="Back_Click" Padding="0,10,14,10"/>
+      <Button x:Name="BackButton" Content="‹  Your Clips" Style="{StaticResource Quiet}" Click="Back_Click" Padding="8,10" Margin="0,0,16,0"/>
       <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
         <DockPanel x:Name="NameDisplay" HorizontalAlignment="Left"><Button x:Name="RenameButton" DockPanel.Dock="Right" Content="&#xE70F;" FontFamily="Segoe Fluent Icons" Style="{StaticResource Quiet}" Padding="7" Click="Rename_Click" AutomationProperties.Name="Rename clip" ToolTip="Rename clip"/><TextBlock x:Name="ClipTitle" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/></DockPanel>
         <TextBox x:Name="NameEdit" Visibility="Collapsed" KeyDown="Name_KeyDown" LostKeyboardFocus="Name_Blurred" AutomationProperties.Name="Clip name"/>

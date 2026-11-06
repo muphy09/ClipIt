@@ -3,12 +3,17 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 
 namespace ClipIt;
 
 internal sealed class DiskReplayBuffer : IDisposable
 {
-    private sealed record Segment(string Path, double End);
+    private sealed record Inspection(double Duration, Exception? Error = null);
+    private sealed record Segment(string Path, double End)
+    {
+        internal TaskCompletionSource<Inspection> Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
     private readonly Settings settings;
     private readonly Action<WorkerMessage> send;
     private readonly ConcurrentQueue<(string Next, double Time)> changes = new();
@@ -16,6 +21,9 @@ internal sealed class DiskReplayBuffer : IDisposable
     private readonly Stopwatch clock = new();
     private readonly CancellationTokenSource lifetime = new();
     private readonly FileStream sessionLock;
+    // One probe at a time, with a bounded backlog even if the drive stops responding.
+    private readonly Channel<Segment> indexing = Channel.CreateBounded<Segment>(160);
+    private readonly Task indexWorker;
     private Task<string>? export;
     private string? destination;
     private double requestedAt;
@@ -37,6 +45,7 @@ internal sealed class DiskReplayBuffer : IDisposable
         sessionLock = new FileStream(Path.Combine(DirectoryPath, "session.lock"), FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
         InitialPath = current = Path.Combine(DirectoryPath, ".clipit-segment-initial.mp4");
         CheckSpace();
+        indexWorker = Task.Run(IndexSegments);
     }
 
     internal void StartClock() => clock.Restart();
@@ -54,27 +63,65 @@ internal sealed class DiskReplayBuffer : IDisposable
             string next = Path.GetFullPath(change.Next);
             if (!next.StartsWith(DirectoryPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("Unexpected replay segment path.");
-            segments.Add(new(current, change.Time)); current = next;
+            var closed = new Segment(current, change.Time);
+            segments.Add(closed); current = next;
+            if (!indexing.Writer.TryWrite(closed)) throw new IOException("Replay segment inspection cannot keep up with recording.");
             if (destination is { } target && change.Time >= requestedAt)
             {
                 destination = null;
-                var files = segments.Select(s => s.Path).ToArray();
                 double afterRequest = Math.Max(0, change.Time - requestedAt);
-                export = Export(files, target, settings.ReplaySeconds, afterRequest, lifetime.Token);
+                var snapshot = segments.ToArray();
+                Log.Write($"Disk replay split after {clock.Elapsed.TotalSeconds - requestedAt:0.000}s; {snapshot.Count(s => s.Ready.Task.IsCompletedSuccessfully)}/{snapshot.Length} segments indexed.");
+                export = ExportIndexed(snapshot, target, afterRequest, lifetime.Token);
             }
         }
         if (export?.IsCompleted == true)
         {
-            try { string path = export.GetAwaiter().GetResult(); send(new("saved", "Replay saved", Path: path)); }
+            try
+            {
+                string path = export.GetAwaiter().GetResult();
+                Log.Write($"Disk replay published and notifying after {clock.Elapsed.TotalSeconds - requestedAt:0.000}s.");
+                send(new("saved", "Replay saved", Path: path));
+            }
             catch (Exception ex) { Log.Write("Disk replay save: " + ex); send(new("error", "Could not save replay: " + ex.Message)); }
             finally { export = null; }
         }
+        foreach (var segment in segments)
+            if (segment.Ready.Task.IsCompletedSuccessfully && segment.Ready.Task.Result.Error is { } error)
+                throw new IOException("Could not inspect a finalized replay segment.", error);
         if (!Saving)
-            while (segments.Count > 2 && segments[0].End < clock.Elapsed.TotalSeconds - settings.ReplaySeconds - 4)
+            while (segments.Count > 2 && segments[0].Ready.Task.IsCompleted && segments[0].End < clock.Elapsed.TotalSeconds - settings.ReplaySeconds - 4)
             {
                 File.Delete(segments[0].Path); segments.RemoveAt(0);
             }
         if (DateTime.UtcNow >= nextSpaceCheck) { CheckSpace(); nextSpaceCheck = DateTime.UtcNow.AddSeconds(5); }
+    }
+
+    private async Task IndexSegments()
+    {
+        try
+        {
+            await foreach (var segment in indexing.Reader.ReadAllAsync(lifetime.Token))
+            {
+                try { segment.Ready.SetResult(new(await FinalizedDuration(segment.Path, lifetime.Token))); }
+                catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { return; }
+                catch (Exception ex) { segment.Ready.SetResult(new(0, ex)); }
+            }
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+    }
+
+    private async Task<string> ExportIndexed(Segment[] snapshot, string target, double afterRequest, CancellationToken token)
+    {
+        var durations = new double[snapshot.Length];
+        for (int i = 0; i < snapshot.Length; i++)
+        {
+            var inspected = await snapshot[i].Ready.Task.WaitAsync(token);
+            if (inspected.Error != null) throw new IOException("Could not inspect a replay segment.", inspected.Error);
+            durations[i] = inspected.Duration;
+        }
+        Log.Write($"Disk replay segments ready after {clock.Elapsed.TotalSeconds - requestedAt:0.000}s.");
+        return await Export(snapshot.Select(s => s.Path).ToArray(), durations, target, settings.ReplaySeconds, afterRequest, token);
     }
 
     private void CheckSpace()
@@ -85,23 +132,20 @@ internal sealed class DiskReplayBuffer : IDisposable
 
     internal static async Task<string> Export(string[] segments, string target, int seconds, double afterRequest, CancellationToken token)
     {
+        var durations = new double[segments.Length];
+        for (int i = 0; i < segments.Length; i++) durations[i] = await FinalizedDuration(segments[i], token);
+        return await Export(segments, durations, target, seconds, afterRequest, token);
+    }
+
+    internal static async Task<string> Export(string[] segments, double[] durations, string target, int seconds, double afterRequest, CancellationToken token)
+    {
         if (segments.Length == 0) throw new IOException("The replay buffer is not ready yet.");
+        if (durations.Length != segments.Length || durations.Any(d => !double.IsFinite(d) || d <= 0)) throw new IOException("Invalid replay segment timing.");
+        var timing = Stopwatch.StartNew();
         string list = Path.Combine(Path.GetDirectoryName(segments[0])!, ".clipit-" + Guid.NewGuid().ToString("N") + ".ffconcat");
         string temporary = Path.Combine(Path.GetDirectoryName(target)!, ".clipit-save-" + Guid.NewGuid().ToString("N") + ".mp4");
         try
         {
-            // The file-change signal precedes the helper finishing its previous file. Wait for finalized, readable segments.
-            var durations = new List<double>();
-            foreach (string file in segments)
-            {
-                double duration = 0;
-                for (int attempt = 0; attempt < 30; attempt++)
-                {
-                    try { duration = await SegmentDuration(file, token); break; }
-                    catch (IOException) when (attempt < 29) { await Task.Delay(100, token); }
-                }
-                durations.Add(duration);
-            }
             double total = durations.Sum();
             double end = Math.Max(.1, total - afterRequest);
             double start = Math.Max(0, end - seconds);
@@ -123,16 +167,29 @@ internal sealed class DiskReplayBuffer : IDisposable
             args.AddRange(["-n", temporary]);
             var result = await MediaTools.Run("ffmpeg", args, token, 80);
             if (result.Exit != 0) throw new IOException("Could not assemble the replay. " + result.Error);
+            Log.Write($"Disk replay assembly completed in {timing.Elapsed.TotalSeconds:0.000}s.");
+            timing.Restart();
             var saved = await MediaTools.Probe(temporary, token);
             if (!saved.HasStems) throw new IOException("The replay did not retain all four audio tracks.");
             token.ThrowIfCancellationRequested();
             File.Move(temporary, target, overwrite: false);
+            Log.Write($"Disk replay verification and publication completed in {timing.Elapsed.TotalSeconds:0.000}s.");
             return target;
         }
         finally
         {
             try { File.Delete(list); } catch { }
             try { File.Delete(temporary); } catch { }
+        }
+    }
+
+    private static async Task<double> FinalizedDuration(string file, CancellationToken token)
+    {
+        // OBS signals a split before its helper necessarily finishes the preceding MP4.
+        for (int attempt = 0; ; attempt++)
+        {
+            try { return await SegmentDuration(file, token); }
+            catch (IOException) when (attempt < 29) { await Task.Delay(100, token); }
         }
     }
 
@@ -174,6 +231,8 @@ internal sealed class DiskReplayBuffer : IDisposable
     public void Dispose()
     {
         lifetime.Cancel();
+        indexing.Writer.TryComplete();
+        try { indexWorker.GetAwaiter().GetResult(); } catch { }
         try { export?.GetAwaiter().GetResult(); } catch { }
         lifetime.Dispose(); sessionLock.Dispose();
         TryClean(DirectoryPath, Path.GetDirectoryName(DirectoryPath)!);

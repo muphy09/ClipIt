@@ -7,6 +7,28 @@
   <SolidColorBrush x:Key="Text" Color="#EFF4FC"/>
   <SolidColorBrush x:Key="Muted" Color="#94A4BB"/>
   <SolidColorBrush x:Key="Blue" Color="#4D8DFF"/>
+  <Style x:Key="LibraryTab" TargetType="RadioButton">
+    <Setter Property="Foreground" Value="#94A4BB"/><Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+      <Border x:Name="Tab" Background="Transparent" BorderBrush="Transparent" BorderThickness="0,0,0,2" Padding="18,10"><ContentPresenter/></Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="#EFF4FC"/><Setter TargetName="Tab" Property="BorderBrush" Value="#4D8DFF"/><Setter TargetName="Tab" Property="Background" Value="#17273C"/></Trigger>
+        <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="White"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Tab" Property="BorderBrush" Value="#9AC3FF"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="ClipContextMenu" TargetType="ContextMenu">
+    <Setter Property="Foreground" Value="#EFF4FC"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContextMenu"><Border Background="#121D2C" BorderBrush="#344863" BorderThickness="1" CornerRadius="8" Padding="5" MinWidth="150"><StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/></Border></ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="ClipMenuItem" TargetType="MenuItem">
+    <Setter Property="Foreground" Value="#EFF4FC"/><Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
+      <Border x:Name="MenuRow" Background="Transparent" CornerRadius="5" Padding="14,10"><ContentPresenter ContentSource="Header" RecognizesAccessKey="True"/></Border>
+      <ControlTemplate.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter TargetName="MenuRow" Property="Background" Value="#223B60"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger></ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <Style TargetType="TextBlock">
     <Setter Property="Foreground" Value="{StaticResource Text}"/>
     <Setter Property="FontSize" Value="13"/>
@@ -64,6 +86,24 @@
     <Setter Property="Background" Value="Transparent"/>
     <Setter Property="BorderBrush" Value="Transparent"/>
     <Setter Property="Foreground" Value="#93A5BF"/>
+  </Style>
+  <Style x:Key="LeftNavigation" TargetType="Button" BasedOn="{StaticResource Quiet}">
+    <Setter Property="HorizontalContentAlignment" Value="Left"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7" Padding="{TemplateBinding Padding}">
+        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="#6385B8"/></Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="#82B3FF"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Frame" Property="Opacity" Value="0.65"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="InlineNotice" TargetType="Border">
+    <Setter Property="Visibility" Value="Collapsed"/><Setter Property="Background" Value="#30251E"/>
+    <Setter Property="BorderBrush" Value="#624931"/><Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="8"/><Setter Property="Padding" Value="13"/><Setter Property="Margin" Value="0,0,0,14"/>
   </Style>
   <Style TargetType="TextBox">
     <Setter Property="Background" Value="{StaticResource Input}"/>

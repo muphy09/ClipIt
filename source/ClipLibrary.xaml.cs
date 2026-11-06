@@ -21,6 +21,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private Wpf.Point dragStart;
     private ClipItem? mouseClip;
     private bool dragged, disposed;
+    private string? selectedGame;
     public bool Busy => Editor.Busy;
     private readonly Dictionary<string, ClipItem> items = new(StringComparer.OrdinalIgnoreCase);
     public ClipLibrary()
@@ -63,16 +64,80 @@ public partial class ClipLibrary : C.UserControl, IDisposable
             foreach (var f in files)
             {
                 var stamp = new ClipStamp(f.Length, f.LastWriteTimeUtc);
-                if (!items.TryGetValue(f.FullName, out var item) || item.Stamp != stamp) item = new ClipItem(f.FullName, stamp, string.Equals(f.DirectoryName, directory, StringComparison.OrdinalIgnoreCase) ? "Unsorted" : f.Directory!.Name);
+                if (!items.TryGetValue(f.FullName, out var item) || item.Stamp != stamp) item = new ClipItem(f.FullName, stamp, ClipFiles.Application(f.FullName, directory));
                 next.Add(item);
             }
-            clips.Clear(); items.Clear();
-            foreach (var item in next) { items[item.Path] = item; clips.Add(item); }
+            items.Clear();
+            foreach (var item in next) items[item.Path] = item;
             SummaryLabel.Text = $"{files.Length} {(files.Length == 1 ? "clip" : "clips")}  ·  {files.Sum(f => f.Length) / 1048576.0:0.#} MB  ·  Newest first";
-            EmptyState.Visibility = clips.Count == 0 ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+            UpdateView();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { LibraryMessage.Text = "Could not load clips: " + ex.Message; }
+    }
+    private void UpdateView()
+    {
+        if (GamesList == null) return; // Checked can fire while XAML is still loading.
+        bool byGame = ByGameTab.IsChecked == true;
+        var ordered = items.Values.OrderByDescending(c => c.Stamp.Modified).ThenBy(c => c.Path, StringComparer.OrdinalIgnoreCase).ToArray();
+        var games = ordered.GroupBy(c => c.Application, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new GameFolder(g.Key, g.Count())).OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+        bool folders = byGame && selectedGame == null;
+        GamesList.ItemsSource = games;
+        GamesList.Visibility = folders ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+        ClipsList.Visibility = folders ? Wpf.Visibility.Collapsed : Wpf.Visibility.Visible;
+        GameNavigation.Visibility = byGame && selectedGame != null ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+        GameTitle.Text = selectedGame ?? "";
+        clips.Clear();
+        foreach (var item in ordered.Where(c => !byGame || selectedGame == null || string.Equals(c.Application, selectedGame, StringComparison.OrdinalIgnoreCase))) clips.Add(item);
+        EmptyState.Visibility = (folders ? games.Length == 0 : clips.Count == 0) ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+        EmptyTitle.Text = selectedGame != null && byGame ? "No clips in this game yet." : "Your next highlight lives here.";
+        LibraryHint.Text = folders ? "Games A–Z. Open a folder to see its clips." : "Newest first. Click to edit, right-click to copy or delete, or drag to another app.";
+    }
+    private void Tab_Changed(object sender, Wpf.RoutedEventArgs e) => UpdateView();
+    private void Games_Back(object sender, Wpf.RoutedEventArgs e) { selectedGame = null; UpdateView(); }
+    private void Game_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is Wpf.DependencyObject source && (C.ItemsControl.ContainerFromElement(GamesList, source) as C.ListBoxItem)?.DataContext is GameFolder game)
+        { OpenGame(game.Name); e.Handled = true; }
+    }
+    private void Game_Key(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && GamesList.SelectedItem is GameFolder game) { OpenGame(game.Name); e.Handled = true; }
+    }
+    private void OpenGame(string name) { selectedGame = name; UpdateView(); }
+    private sealed record GameFolder(string Name, int Count) { public string Detail => $"{Count} {(Count == 1 ? "clip" : "clips")}"; }
+
+    private void Clip_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        ClipsList.SelectedItem = ItemAt(e.OriginalSource); mouseClip = null;
+    }
+    private void ClipMenu_Opened(object sender, Wpf.RoutedEventArgs e)
+    {
+        if (sender is C.ContextMenu menu && (ClipsList.SelectedItem is not ClipItem || Editor.Busy)) menu.IsOpen = false;
+    }
+    private void Copy_Click(object sender, Wpf.RoutedEventArgs e)
+    {
+        if (ClipsList.SelectedItem is not ClipItem item) return;
+        try
+        {
+            if (!File.Exists(item.Path)) throw new IOException("This clip is no longer available.");
+            Wpf.Clipboard.SetFileDropList(new System.Collections.Specialized.StringCollection { item.Path });
+            LibraryMessage.Text = "Clip copied. Paste it into a folder or another app.";
+        }
+        catch (Exception ex) { LibraryMessage.Text = "Could not copy clip: " + ex.Message; }
+    }
+    private async void Delete_Click(object sender, Wpf.RoutedEventArgs e)
+    {
+        if (ClipsList.SelectedItem is not ClipItem item || Editor.Busy) return;
+        try
+        {
+            // Recycle rather than permanently deleting so accidental clicks are recoverable.
+            await Task.Run(() => Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(item.Path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin));
+            LibraryMessage.Text = "Clip moved to the Recycle Bin.";
+            await Reload();
+        }
+        catch (Exception ex) { LibraryMessage.Text = "Could not delete clip: " + ex.Message; }
     }
     private async void Thumbnail_Loaded(object sender, Wpf.RoutedEventArgs e)
     {
@@ -100,6 +165,10 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         if (Editor.Busy) return;
         Editor.CloseMedia(); Editor.Visibility = Wpf.Visibility.Collapsed;
         Dashboard.Visibility = Wpf.Visibility.Visible; Refresh();
+    }
+    public void ShowRecent()
+    {
+        ShowDashboard(); RecentTab.IsChecked = true; UpdateView();
     }
     private ClipItem? ItemAt(object source)
     {
@@ -132,7 +201,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     }
     private void Library_DragOver(object sender, Wpf.DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(Wpf.DataFormats.FileDrop) && !Editor.Busy ? Wpf.DragDropEffects.Copy : Wpf.DragDropEffects.None;
+        e.Effects = e.Data.GetData(Wpf.DataFormats.FileDrop) is string[] files && !Editor.Busy && files.Any(CanImport) ? Wpf.DragDropEffects.Copy : Wpf.DragDropEffects.None;
         e.Handled = true;
     }
     private async void Library_Drop(object sender, Wpf.DragEventArgs e)
@@ -148,7 +217,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
             Directory.CreateDirectory(folder);
             foreach (string source in files.Where(p => string.Equals(Path.GetExtension(p), ".mp4", StringComparison.OrdinalIgnoreCase) && File.Exists(p)))
             {
-                if (string.Equals(Path.GetDirectoryName(Path.GetFullPath(source)), Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase)) continue;
+                if (ClipFiles.IsInLibrary(source, folder)) continue;
                 string destination = Path.Combine(folder, Path.GetFileName(source)); int n = 1;
                 while (File.Exists(destination)) destination = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(source)} ({n++}).mp4");
                 // Import is a copy; never move or overwrite a file dropped from another app.
@@ -166,6 +235,11 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { LibraryMessage.Text = "Import couldn't finish: " + ex.Message; }
+    }
+    private bool CanImport(string path)
+    {
+        try { return folder.Length > 0 && string.Equals(Path.GetExtension(path), ".mp4", StringComparison.OrdinalIgnoreCase) && File.Exists(path) && !ClipFiles.IsInLibrary(path, folder); }
+        catch { return false; }
     }
     public void PausePlayback() => Editor.Suspend();
     public void Dispose() { disposed = true; ++generation; lifetime.Cancel(); watcher?.Dispose(); refreshTimer.Stop(); Editor.Dispose(); }

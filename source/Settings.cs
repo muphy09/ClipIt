@@ -24,6 +24,8 @@ public sealed record Settings
     public bool BufferInMemory { get; init; }
     public uint Modifiers { get; init; } = 1; // Alt
     public uint Key { get; init; } = (uint)Keys.B;
+    public uint LibraryModifiers { get; init; } = 5; // Alt + Shift
+    public uint LibraryKey { get; init; } = (uint)Keys.B;
     public static string DataDirectory => Environment.GetEnvironmentVariable("CLIPIT_DATA") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClipIt");
     public static string FileName => Path.Combine(DataDirectory, "settings.json");
     public static Settings Load()
@@ -55,6 +57,8 @@ public sealed record Settings
             throw new ArgumentException("Invalid recording quality settings.");
         if (Key < 1 || Key > 254 || Modifiers > 15 || (Modifiers & 3) == 0)
             throw new ArgumentException("The shortcut must include Ctrl or Alt.");
+        if (LibraryKey < 1 || LibraryKey > 254 || LibraryModifiers > 15 || (LibraryModifiers & 3) == 0)
+            throw new ArgumentException("The Your Clips shortcut must include Ctrl or Alt.");
         if (ReplaySeconds < 30 || ReplaySeconds > 300 || ReplaySeconds % 30 != 0)
             throw new ArgumentException("Replay length must be 30 seconds to 5 minutes, in 30-second steps.");
         return this;
@@ -68,6 +72,7 @@ public sealed record Settings
         File.Move(temp, FileName, true);
     }
     public string Shortcut => $"{((Modifiers & 2) != 0 ? "Ctrl+" : "")}{((Modifiers & 1) != 0 ? "Alt+" : "")}{((Modifiers & 4) != 0 ? "Shift+" : "")}{((Modifiers & 8) != 0 ? "Win+" : "")}{(Keys)Key}";
+    public string LibraryShortcut => (this with { Modifiers = LibraryModifiers, Key = LibraryKey }).Shortcut;
 }
 
 internal static class Log

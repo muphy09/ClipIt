@@ -15,6 +15,8 @@ internal static class Program
         if (args.Length == 2 && args[0] == "--media-checks") return MediaChecks.Run(args[1]).GetAwaiter().GetResult();
         if (args.Length == 2 && args[0] == "--buffer-checks") return BufferChecks.Run(args[1]).GetAwaiter().GetResult();
         if (args.Length == 2 && args[0] == "--desktop-checks") return DesktopChecks.Run(args[1]);
+        if (args.Length == 2 && args[0] == "--capture-ui-checks") return DesktopChecks.Run(args[1], recordingChecks: false);
+        if (args.Length == 2 && args[0] == "--library-checks") return LibraryChecks.Run(args[1]);
         if (args.Length == 2 && args[0] == "--list-apps") { File.WriteAllText(args[1], System.Text.Json.JsonSerializer.Serialize(AppTargets.List())); return 0; }
         string instance = Environment.UserName;
         if (Environment.GetEnvironmentVariable("CLIPIT_DATA") is { Length: > 0 } isolated)

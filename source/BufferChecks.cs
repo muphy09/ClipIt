@@ -52,6 +52,53 @@ internal static class BufferChecks
             try { await DiskReplayBuffer.Export(segments, Path.Combine(folder, "cancelled.mp4"), 4, 0, cancellation.Token); } catch (OperationCanceledException) { rejected = true; }
             Require(rejected && !File.Exists(Path.Combine(folder, "cancelled.mp4")) && !Directory.GetFiles(folder, ".clipit-save-*").Any(), "Cancelled saves leave no partial output or published clip");
 
+            // Exercise the recording path: background inspection, a split signalled before
+            // the helper finishes its file, and a second save reusing the same index.
+            var messages = new List<WorkerMessage>();
+            var liveSettings = new Settings { Folder = Path.Combine(folder, "indexed"), ReplaySeconds = 30 };
+            string liveDirectory;
+            using (var buffer = new DiskReplayBuffer(liveSettings, messages.Add))
+            {
+                liveDirectory = buffer.DirectoryPath;
+                buffer.StartClock();
+                File.Copy(segments[0], buffer.InitialPath);
+                string second = Path.Combine(liveDirectory, ".clipit-segment-second.mp4");
+                buffer.FileChanged(second); buffer.Tick();
+                string indexedTarget = Path.Combine(folder, "indexed-first.mp4");
+                buffer.Save(indexedTarget);
+                string third = Path.Combine(liveDirectory, ".clipit-segment-third.mp4");
+                buffer.FileChanged(third); buffer.Tick();
+                await Task.Delay(200);
+                File.Copy(segments[1], second);
+                async Task WaitForSave()
+                {
+                    var wait = System.Diagnostics.Stopwatch.StartNew();
+                    while (buffer.Saving && wait.Elapsed.TotalSeconds < 15) { buffer.Tick(); await Task.Delay(25); }
+                    Require(!buffer.Saving && messages.All(m => m.Type != "error"), "Indexed replay finishes without errors after delayed segment finalization");
+                }
+                await WaitForSave();
+                Require(messages.Count(m => m.Type == "saved") == 1 && (await MediaTools.Probe(indexedTarget, CancellationToken.None)).HasStems,
+                    "Background-indexed save publishes four named audio tracks");
+                string repeatedTarget = Path.Combine(folder, "indexed-second.mp4");
+                buffer.Save(repeatedTarget);
+                File.Copy(segments[2], third);
+                buffer.FileChanged(Path.Combine(liveDirectory, ".clipit-segment-fourth.mp4"));
+                await WaitForSave();
+                Require(messages.Count(m => m.Type == "saved") == 2 && (await MediaTools.Probe(repeatedTarget, CancellationToken.None)).HasStems,
+                    "Repeated saves reuse retained indexed segments and include the latest closed segment");
+                Require((await MediaTools.Run("ffmpeg", ["-v", "error", "-xerror", "-i", repeatedTarget, "-map", "0", "-f", "null", "-"], CancellationToken.None)).Exit == 0,
+                    "Repeated indexed replay decodes across every video and audio stream");
+            }
+            Require(!Directory.Exists(liveDirectory), "Shutdown joins background inspection before cleaning the replay session");
+            using (var pending = new DiskReplayBuffer(liveSettings, _ => { }))
+            {
+                liveDirectory = pending.DirectoryPath;
+                pending.StartClock(); pending.Save(Path.Combine(folder, "pending.mp4"));
+                pending.FileChanged(Path.Combine(liveDirectory, ".clipit-segment-pending.mp4")); pending.Tick();
+            }
+            Require(!Directory.Exists(liveDirectory) && !File.Exists(Path.Combine(folder, "pending.mp4")),
+                "Shutdown cancels pending inspection and export without publishing a partial clip");
+
             var settings = new Settings { Folder = Path.Combine(folder, "cleanup") };
             string bufferRoot = Path.Combine(settings.Folder, ".clipit-buffer");
             using (var active = new DiskReplayBuffer(settings, _ => { }))

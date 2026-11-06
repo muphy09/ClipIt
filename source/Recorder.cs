@@ -281,7 +281,7 @@ internal sealed class Recorder : IDisposable
         {
             string directory = Path.Combine(settings.Folder, applicationFolder);
             Directory.CreateDirectory(directory);
-            if (diskBuffer == null) WithData(d => { Obs.obs_data_set_string(d, "directory", directory); Obs.obs_output_update(output, d); return 0; });
+            if (diskBuffer == null) WithData(d => { Obs.obs_data_set_string(d, "directory", directory); Obs.obs_data_set_string(d, "format", ClipFiles.SaveName(applicationFolder)); Obs.obs_output_update(output, d); return 0; });
             string probe = Path.Combine(directory, ".clipit-" + Guid.NewGuid().ToString("N"));
             using (File.Create(probe)) { }
             File.Delete(probe);
@@ -294,7 +294,7 @@ internal sealed class Recorder : IDisposable
                 if (diskBuffer != null)
                 {
                     diskBuffer.Tick();
-                    diskBuffer.Save(Path.Combine(directory, $"ClipIt {DateTime.Now:yyyy-MM-dd HH-mm-ss}-{Guid.NewGuid().ToString("N")[..6]}.mp4"));
+                    diskBuffer.Save(Path.Combine(directory, ClipFiles.SaveName(applicationFolder) + ".mp4"));
                     if (!Obs.proc_handler_call(Obs.obs_output_get_proc_handler(output), "split_file", ref cd)) throw new IOException("The replay split request failed.");
                 }
                 else if (!Obs.proc_handler_call(Obs.obs_output_get_proc_handler(output), "save", ref cd)) throw new IOException("The replay save request failed.");
@@ -306,10 +306,10 @@ internal sealed class Recorder : IDisposable
         catch (Exception ex) { send(new("error", "Could not save: " + ex.Message)); }
     }
 
-    public void Tick()
+    // Keep save events responsive without increasing game discovery or heartbeat frequency.
+    public void PollSaves()
     {
         diskBuffer?.Tick();
-        FollowGame();
         if (Interlocked.Exchange(ref saved, 0) != 0)
         {
             Obs.CallData cd = default;
@@ -323,6 +323,12 @@ internal sealed class Recorder : IDisposable
             }
             finally { Obs.bfree(cd.Stack); saving = false; }
         }
+    }
+
+    public void Tick()
+    {
+        PollSaves();
+        FollowGame();
         if (saving && DateTime.UtcNow - saveRequested > TimeSpan.FromSeconds(90))
             throw new IOException("Saving a clip stalled. Restarting the recorder; the unsaved buffer will be lost.");
         if (!Obs.obs_output_active(output)) throw new IOException("Recording stopped: " + Obs.Text(Obs.obs_output_get_last_error(output)));
@@ -386,6 +392,7 @@ internal sealed class Recorder : IDisposable
                     if (cmd == "save") engine.Save();
                     if (cmd == "devices") engine.SendMicrophoneDevices();
                 }
+                engine.PollSaves();
                 if (tick.ElapsedMilliseconds >= 1000) { engine.Tick(); tick.Restart(); }
                 Thread.Sleep(50);
             }

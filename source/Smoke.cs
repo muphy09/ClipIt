@@ -14,18 +14,27 @@ internal static class Smoke
         string result = Path.Combine(folder, "result.json");
         var events = new List<WorkerMessage>();
         bool saved = false;
+        var saveClock = new Stopwatch();
+        double? saveMilliseconds = null;
         try
         {
-            using var recorder = new Recorder(Settings.Load() with { Folder = folder }, m => { events.Add(m); if (m.Type == "saved") saved = true; });
+            using var recorder = new Recorder(Settings.Load() with { Folder = folder }, m =>
+            {
+                events.Add(m);
+                if (m.Type == "saved") { saved = true; saveMilliseconds = saveClock.Elapsed.TotalMilliseconds; }
+            });
             recorder.Start();
             var clock = Stopwatch.StartNew();
+            var tick = Stopwatch.StartNew();
             bool requested = false;
             while (clock.Elapsed.TotalSeconds < duration + 30 && !saved)
             {
-                if (!requested && clock.Elapsed.TotalSeconds >= duration) { recorder.Save(); requested = true; }
-                recorder.Tick(); Thread.Sleep(1000);
+                if (!requested && clock.Elapsed.TotalSeconds >= duration) { saveClock.Start(); recorder.Save(); requested = true; }
+                recorder.PollSaves();
+                if (tick.ElapsedMilliseconds >= 1000) { recorder.Tick(); tick.Restart(); }
+                Thread.Sleep(50);
             }
-            File.WriteAllText(result, JsonSerializer.Serialize(new { Success = saved, Events = events }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(result, JsonSerializer.Serialize(new { Success = saved, SaveMilliseconds = saveMilliseconds, Events = events }, new JsonSerializerOptions { WriteIndented = true }));
             return saved ? 0 : 1;
         }
         catch (Exception ex)

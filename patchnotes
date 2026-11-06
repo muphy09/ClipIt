@@ -1,0 +1,22 @@
+## [v0.5.7]
+
+### What's New
+
+- Your Clips now has two tabs - Recent and By Game
+    - Unknown games are placed into the Unsorted folder
+- File Names start with the game name or Desktop, followed by the date and time. Existing filenames stay as they are
+- Right-click a clip to Copy or Delete it
+- Dragging a clip back into Your Clips no longer makes another copy of it. That includes clips already tucked away in game folders
+- Added a Your Clips shortcut! Alt + Shift + B opens Recent straight away, even when ClipIt is minimized or tucked into the tray
+    - Hotkey can be adjusted
+- The tray tooltip now shows whether ClipIt is Active or Inactive, along with your current Capture shortcut
+
+### Bugfixes / Improvements
+
+- The recording card is clearer about what's happening: the replay buffer is building, recording is active with your chosen amount of footage ready, or recording has been paused
+- Replay Length now lives in the sidebar instead of the top-right corner of Capture
+- Warnings appear right below the section they belong to
+- The Apply settings bar only appears when you have unsaved changes and says "Changes have been made"
+- Capture and Your Clips now line up on the left. Fixed the hover spacing on the All Games and Your Clips back buttons, too, so their outlines don't crowd the game name or clip title
+- New motto: "Finally something that works"
+- Fixed the delay when capturing introduced with disk buffering

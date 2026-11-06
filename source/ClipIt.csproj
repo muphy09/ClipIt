@@ -19,5 +19,6 @@
     <PackageReference Include="Velopack" Version="1.2.161" />
     <Resource Include="Assets\ClipIt-logo.png" />
     <Resource Include="Assets\ClipIt.ico" />
+    <Content Include="..\patchnotes" Link="patchnotes" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

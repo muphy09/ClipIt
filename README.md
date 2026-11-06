@@ -10,11 +10,17 @@ On startup ClipIt checks the public GitHub Releases feed. The footer shows **- U
 
 Offline or failed checks show **Update unavailable - Retry** and leave recording running. A failed check never claims the app is up to date. Downloads are checked by Velopack before they become installable. Settings and recordings live outside the replaced current application directory. An update restarts the replay buffer; existing saved clips remain intact.
 
-Recording starts on launch. Close the window to keep recording in the tray; double-click the tray icon to return. The tray menu offers save, pause/resume, restart, Your clips, and quit.
+Recording starts on launch. Close the window to keep recording in the tray; double-click the tray icon to return. The tray menu offers save, pause/resume, restart, Your Clips, and quit.
 
 Defaults for new profiles: **Alt+B**, a two-minute rolling buffer, primary display at up to **1080p / 60 FPS / 24 Mbps**, and **Videos/ClipIt** as the clip root. Existing saved shortcuts are preserved. The microphone starts off. Apply settings after changing a display, game, microphone, quality, or folder. Applying starts a fresh buffer.
 
-Click **Save shortcut** to show the italic **Input keybind** prompt, then press a combination containing Ctrl or Alt. Valid shortcuts register and save immediately, without Apply settings or a recorder restart. If another app uses the combination, ClipIt keeps the previous shortcut. Leaving an empty prompt restores the current shortcut. Scrolling over closed dropdowns or sliders scrolls the page without changing their values; an open dropdown scrolls its own list.
+Click **Capture shortcut** to show the italic **Input keybind** prompt, then press a combination containing Ctrl or Alt. Valid shortcuts register and save immediately, without Apply settings or a recorder restart. If another app uses the combination, ClipIt keeps the previous shortcut. Leaving an empty prompt restores the current shortcut. Scrolling over closed dropdowns or sliders scrolls the page without changing their values; an open dropdown scrolls its own list.
+
+**Your Clips shortcut** defaults to **Alt+Shift+B**. Change it in **Save Location** just like the capture shortcut. It opens Your Clips on Recent, newest first, restores a minimized window, and brings ClipIt back from the tray. Both shortcuts save immediately; conflicting combinations keep the previous binding. ClipIt must be running (including in the tray) for global shortcuts to work.
+
+The status card says **Replay buffer is building** until the selected length is ready, then **Recording is active. Last x minutes/seconds ready for capture.** Paused recording says **Recording has been paused.** The sidebar displays **Replay Length** using the applied setting.
+
+The **Apply settings** bar appears only when capture settings differ from the saved values and says **Changes have been made**. Reverting edits or applying them hides it. Shortcut changes save immediately without showing the bar. Capture warnings appear below their related section; shortcut warnings appear below **Save Location** and clear when shortcut entry is canceled, corrected, or left behind.
 
 Choose **Replay length** beside **Frame rate**: 30 seconds to 5 minutes in 30-second steps. Click **Apply settings** to start a fresh buffer at the selected length. Resolution choices stop at the selected monitor's current height, including nonstandard heights such as 900p. Changing resolution or frame rate suggests a new bitrate, which also updates the estimated full-clip file size beneath **Video bitrate**. You can override the bitrate directly; the next resolution or frame-rate change suggests a new value again. Changing replay length preserves your manual bitrate. The size estimate includes all four audio tracks and approximate container overhead. Actual size varies with content and keyframe timing.
 
@@ -24,7 +30,7 @@ Choose **Replay length** beside **Frame rate**: 30 seconds to 5 minutes in 30-se
 
 Turn on **Save replay in RAM** in Settings to use an in-memory replay instead. The switch saves immediately and starts a fresh buffer, preserving existing saved clips; changing it is blocked while a clip is saving. If Windows identifies the buffer drive as a traditional HDD, ClipIt warns that continuous writes can compete with games and recommends RAM buffering or an SSD save folder. Drives that do not report their type show an explicit unknown-drive notice rather than being assumed SSDs.
 
-Disk mode writes continuously and requires free space for both the rolling buffer and a saved clip. Old segments are removed automatically; generated sessions are cleaned on shutdown and abandoned sessions on the next recorder start. Active sessions and unrelated files are preserved. A full or unavailable drive reports a capture error and enters the normal recovery path. It does not silently change recording quality or switch storage modes.
+Disk mode writes continuously and requires free space for both the rolling buffer and a saved clip. Completed segments are inspected once in the background so saving can reuse their timing information instead of scanning the entire buffer again. Old segments are removed automatically; generated sessions are cleaned on shutdown and abandoned sessions on the next recorder start. Active sessions and unrelated files are preserved. A full or unavailable drive reports a capture error and enters the normal recovery path. It does not silently change recording quality or switch storage modes.
 
 The **Settings** tab at the bottom of the sidebar saves changes immediately. **Start with Windows** registers ClipIt for the current user's Windows sign-in; it is off by default. When enabled, **Start minimized** appears below it. With that option on, Windows startup begins capture in the system tray without showing the main window. Opening ClipIt manually still opens its window. Installed builds use the stable launcher so automatic updates preserve the startup path. Windows startup registration is disabled in isolated development/test instances to keep them separate from the installed app.
 
@@ -44,11 +50,13 @@ Discord is found automatically, including the standard, PTB and Canary executabl
 
 Enable **Microphone** and select the input device. System default follows Windows' default; a named device stores its ID. Refresh devices updates the dropdown. A disconnected saved microphone stays listed instead of silently selecting another input.
 
-## Your clips
+## Your Clips
 
-New recordings create a subfolder for their captured application's executable name, for example `Videos/ClipIt/GameName/ClipIt <date and time>.mp4`. Before a game has been detected, automatic-mode recordings use `Desktop`. Old files stay in place.
+New recordings create a subfolder for their captured application's executable name, for example `Videos/ClipIt/GameName/GameName <date and time>-<unique suffix>.mp4`. Before a game has been detected, automatic-mode recordings use `Desktop` for both the folder and filename. Old files stay in place.
 
-**Your clips** shows one newest-first list across the root and all application subfolders, with thumbnails, application labels, dates, sizes and durations. There is no search field. The list updates when files are saved or changed. Import clips or drop MP4s into the library to copy them into the root folder; originals stay in place and name collisions receive a suffix.
+**Your Clips** opens on **Recent**, a newest-first list across the root and all application subfolders, with thumbnails, application labels, dates, sizes and durations. **By Game** shows alphabetically sorted game folders, including Desktop. Open a folder to see only its clips, newest first; **All games** returns to the folders. Imported clips at the library root appear under **Unsorted** because their captured game is unknown. Both views update when clips change.
+
+Right-click a clip for **Copy** (paste the file into another folder or app) and **Delete** (move it to the Recycle Bin). Import clips or drop external MP4s into the library to copy them into the root folder; originals stay in place and name collisions receive a suffix. Clips already anywhere in the library are ignored when dropped or imported, so dragging a clip back into Your Clips does not duplicate it.
 
 ## Editor and mixer
 
@@ -77,6 +85,8 @@ Capture uses Windows Graphics Capture with HDR-to-SDR conversion, hardware H.264
 Settings and rotating logs are local at `%LOCALAPPDATA%/ClipIt/`. No account or upload feature is included.
 
 ## Develop and release
+
+Settings includes a **Patch Notes** button that opens a themed, scrollable window. Edit the root `patchnotes` file before building: use `## [v0.5.7]` for version headings, `### Bugfixes` (or other section names) for sections, and `- example` for bullet points. Plain paragraphs and wrapped bullet text are supported. The file is copied alongside the app in development builds and release packages; put the newest version first.
 
 The working repository is `C:\dev\ClipIt`. Open that folder in VS Code. Install .NET 10 SDK, Git, and GitHub CLI; sign in to GitHub CLI once with `gh auth login` if not already authenticated. VS Code tasks use the full path to Windows' built-in PowerShell, so PowerShell 7 is not required. No GitHub credentials are embedded in the installed app.
 

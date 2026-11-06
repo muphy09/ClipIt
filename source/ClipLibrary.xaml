@@ -2,13 +2,29 @@
   <UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="Theme.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></UserControl.Resources>
   <Grid Margin="28,24,28,24">
     <Grid x:Name="Dashboard">
-      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
       <Grid Margin="0,0,0,22">
-        <StackPanel><TextBlock Text="Your clips" FontSize="27" FontWeight="SemiBold"/><TextBlock x:Name="SummaryLabel" Text="Your moments, ready to make yours." Style="{StaticResource MutedText}" Margin="0,6,0,0"/></StackPanel>
+        <StackPanel><TextBlock Text="Your Clips" FontSize="27" FontWeight="SemiBold"/><TextBlock x:Name="SummaryLabel" Text="Your moments, ready to make yours." Style="{StaticResource MutedText}" Margin="0,6,0,0"/></StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"><Button Content="Open folder" Click="Folder_Click" Style="{StaticResource Quiet}"/><Button Content="Import clips" Click="Import_Click" Margin="8,0,0,0"/></StackPanel>
       </Grid>
-      <Grid Grid.Row="1">
-        <ListBox x:Name="ClipsList" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" PreviewMouseLeftButtonDown="Clip_MouseDown" PreviewMouseMove="Clip_MouseMove" PreviewMouseLeftButtonUp="Clip_MouseUp" KeyDown="Clip_Key" AutomationProperties.Name="Recorded clips">
+      <StackPanel Grid.Row="1" Margin="0,0,0,16">
+        <StackPanel Orientation="Horizontal">
+          <RadioButton x:Name="RecentTab" Content="Recent" GroupName="LibraryTab" IsChecked="True" Style="{StaticResource LibraryTab}" Checked="Tab_Changed"/>
+          <RadioButton x:Name="ByGameTab" Content="By Game" GroupName="LibraryTab" Margin="8,0,0,0" Style="{StaticResource LibraryTab}" Checked="Tab_Changed"/>
+        </StackPanel>
+        <StackPanel x:Name="GameNavigation" Orientation="Horizontal" Visibility="Collapsed" Margin="0,12,0,0">
+          <Button Content="‹ All Games" Click="Games_Back" Style="{StaticResource Quiet}" Padding="8,8" Margin="0,0,16,0"/>
+          <TextBlock x:Name="GameTitle" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+        </StackPanel>
+      </StackPanel>
+      <Grid Grid.Row="2">
+        <ListBox x:Name="ClipsList" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" PreviewMouseRightButtonDown="Clip_RightClick" PreviewMouseLeftButtonDown="Clip_MouseDown" PreviewMouseMove="Clip_MouseMove" PreviewMouseLeftButtonUp="Clip_MouseUp" KeyDown="Clip_Key" AutomationProperties.Name="Recorded clips">
+          <ListBox.ContextMenu>
+            <ContextMenu Style="{StaticResource ClipContextMenu}" Opened="ClipMenu_Opened">
+              <MenuItem Header="Copy" Click="Copy_Click" Style="{StaticResource ClipMenuItem}"/>
+              <MenuItem Header="Delete" Click="Delete_Click" Style="{StaticResource ClipMenuItem}" Foreground="#FF9C9C"/>
+            </ContextMenu>
+          </ListBox.ContextMenu>
           <ListBox.ItemContainerStyle>
             <Style TargetType="ListBoxItem">
               <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Foreground" Value="#EFF4FC"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,10"/>
@@ -24,13 +40,21 @@
             </Grid>
           </DataTemplate></ListBox.ItemTemplate>
         </ListBox>
+        <ListBox x:Name="GamesList" Visibility="Collapsed" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ItemContainerStyle="{Binding ItemContainerStyle, ElementName=ClipsList}" PreviewMouseLeftButtonUp="Game_Click" KeyDown="Game_Key" AutomationProperties.Name="Games">
+          <ListBox.ItemTemplate><DataTemplate><Grid Margin="6,8">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="56"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons" FontSize="30" Foreground="#6EA6FF" VerticalAlignment="Center"/>
+            <StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Style="{StaticResource MutedText}" Margin="0,6,0,0"/></StackPanel>
+            <TextBlock Grid.Column="2" Text="›" FontSize="26" Foreground="#5E8CC8" VerticalAlignment="Center"/>
+          </Grid></DataTemplate></ListBox.ItemTemplate>
+        </ListBox>
         <StackPanel x:Name="EmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed">
           <TextBlock Text="&#xE714;" FontFamily="Segoe Fluent Icons" Foreground="#4777BC" FontSize="40" HorizontalAlignment="Center"/>
           <TextBlock x:Name="EmptyTitle" Text="Your next highlight lives here." FontSize="20" FontWeight="SemiBold" Margin="0,20,0,8" HorizontalAlignment="Center"/>
           <TextBlock Text="Save a replay, or drop MP4 clips here to add them." Foreground="#839FC3" HorizontalAlignment="Center"/>
         </StackPanel>
       </Grid>
-      <StackPanel Grid.Row="2" Margin="0,12,0,0"><TextBlock x:Name="LibraryMessage" Foreground="#9DB8DB" TextWrapping="Wrap" FontSize="12"/><TextBlock Text="All app folders · newest first. Click to edit, or drag a clip to another app." Foreground="#647F9F" FontSize="11" Margin="0,6,0,0"/></StackPanel>
+      <StackPanel Grid.Row="3" Margin="0,12,0,0"><TextBlock x:Name="LibraryMessage" Foreground="#9DB8DB" TextWrapping="Wrap" FontSize="12"/><TextBlock x:Name="LibraryHint" Text="Newest first. Click to edit, right-click to copy or delete, or drag to another app." Foreground="#647F9F" FontSize="11" Margin="0,6,0,0"/></StackPanel>
     </Grid>
     <local:ClipEditor x:Name="Editor" Visibility="Collapsed" BackRequested="Editor_Back" FileChanged="Editor_Changed"/>
   </Grid>
