@@ -240,6 +240,11 @@ public partial class ClipWindow : Wpf.Window
             case "started":
                 MonitorBox.ToolTip = message.Text;
                 break;
+            case "capture-requested":
+                captureChime.Play();
+                SaveClipButton.IsEnabled = false;
+                SaveButtonText.Text = "Saving…";
+                break;
             case "saved":
                 library?.Refresh();
                 lastPath = message.Path;
@@ -247,7 +252,6 @@ public partial class ClipWindow : Wpf.Window
                 LastClipLabel.ToolTip = lastPath;
                 Notice("Clip saved. " + Path.GetFileName(lastPath));
                 Log.Write("Saved clip: " + lastPath);
-                captureChime.Play();
                 recordingOverlay.FlashSaved();
                 break;
             case "error": case "notice":

@@ -36,7 +36,7 @@ The **Settings** tab at the bottom of the sidebar saves changes immediately. **S
 
 **Overlay** shows a small status badge at the bottom right of the selected capture display: a green check while recording and a red X while inactive, including pause and recovery. It is enabled by default, accepts no mouse input, does not activate or take keyboard focus, and is excluded from Windows capture on supported Windows versions. It is a normal Windows desktop overlay with no game injection, graphics hooks or drivers. Desktop and borderless applications are supported; exclusive fullscreen and other overlays may cover it. No universal anti-cheat compatibility is claimed; individual games still require testing.
 
-The overlay is an icon-only 22 × 22 badge with a 12-point check or X, positioned just above the taskbar clock area. After a clip finishes saving successfully, ClipIt plays a short chime and flashes the enabled badge green. Successful captures do not send a Windows notification. Failed or unavailable saves do not play the success sound.
+The overlay is an icon-only 22 × 22 badge with a 12-point check or X, positioned just above the taskbar clock area. ClipIt plays a short chime immediately when it accepts a capture request, while the clip processes in the background. After the clip finishes saving successfully, the enabled badge flashes green. Successful captures do not send a Windows notification. Unavailable or already-busy save requests do not play the chime; a later save failure still displays an error.
 
 ## Game, Discord and microphone audio
 
@@ -76,7 +76,7 @@ Mixer preview decodes three temporary local audio files only when opening a mult
 
 ## Capture and recovery
 
-At the default quality, two minutes of compressed replay is roughly 370 MB. Disk mode stores it on the save drive; RAM mode holds it in memory, in addition to engine/graphics memory. Longer replay lengths increase the buffer's storage requirement. A full replay can include a few extra seconds for keyframe alignment; saving early keeps the available footage. Save requests are serialized and do not stop recording. The confirmation chime and overlay flash happen after the MP4 is finished.
+At the default quality, two minutes of compressed replay is roughly 370 MB. Disk mode stores it on the save drive; RAM mode holds it in memory, in addition to engine/graphics memory. Longer replay lengths increase the buffer's storage requirement. A full replay can include a few extra seconds for keyframe alignment; saving early keeps the available footage. Save requests are serialized and do not stop recording. The chime immediately acknowledges an accepted request; the overlay flashes after the MP4 is finished.
 
 The tray app supervises a separate recording worker and restarts it after an unexpected exit, stopped output, stalled encoder, unavailable display, or missing heartbeat. Retries back off from 2 to 60 seconds. Resume and display changes request a fresh recorder. Intentional Pause remains paused. Recovery loses the unsaved buffer; existing saved clips stay on disk. This does not recover from the entire tray app crashing, and a still-active black/static image cannot always be detected as a failure.
 

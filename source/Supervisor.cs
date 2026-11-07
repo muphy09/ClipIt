@@ -40,7 +40,7 @@ internal sealed class Supervisor : IDisposable
                     if (Seconds >= Math.Min(60, Settings.ReplaySeconds)) failures = 0;
                     break;
                 case "saving": Saving = true; break;
-                case "saved": case "error": Saving = false; break;
+                case "saved": case "error": case "notice": Saving = false; break;
                 case "fatal": Recover(message.Text); break;
             }
             Message?.Invoke(message);
@@ -99,8 +99,12 @@ internal sealed class Supervisor : IDisposable
     }
     public void Save()
     {
-        if (!Enabled || !Recording) { Message?.Invoke(new("notice", "Recording is not ready yet.")); return; }
+        if (!Enabled || !Recording || writer == null) { Message?.Invoke(new("notice", "Recording is not ready yet.")); return; }
         if (Saving) { Message?.Invoke(new("notice", "Your previous clip is still saving.")); return; }
+        if (Seconds < 3) { Message?.Invoke(new("notice", "The buffer is warming up. Try again in a few seconds.")); return; }
+        // Acknowledge locally before the worker waits for a keyframe or finalizes the MP4.
+        Saving = true;
+        Message?.Invoke(new("capture-requested", "Saving clip…"));
         Send("save");
     }
     public void RefreshMicrophones() => Send("devices");
