@@ -15,6 +15,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
     private string libraryFolder = "";
     private string gameName = "";
     private bool isFavorite;
+    private bool isLinked;
     private ClipInfo? info;
     private ClipStamp stamp;
     private bool playing, opened, resumeAfterSeek, loadingMix;
@@ -55,18 +56,20 @@ public partial class ClipEditor : C.UserControl, IDisposable
         IsVisibleChanged += (_, _) => { if (!IsVisible) Suspend(); };
     }
 
-    public async Task Open(string file, string library)
+    public async Task Open(string file, string library, string? linkedGame = null)
     {
         if (Busy) return;
         int current = ++generation;
         loading?.Cancel(); loading?.Dispose(); loading = new();
         ClosePlayback(); info = null; path = file; libraryFolder = library;
-        isFavorite = ClipFiles.IsFavorite(file, library);
-        gameName = ClipFiles.GameName(file, library);
+        isLinked = linkedGame != null;
+        isFavorite = !isLinked && ClipFiles.IsFavorite(file, library);
+        gameName = linkedGame ?? ClipFiles.GameName(file, library);
         FavoriteButton.Content = isFavorite ? "Favorited" : "Mark as Favorite";
         UpdateSaveActions();
         NameEdit.Visibility = Wpf.Visibility.Collapsed; NameDisplay.Visibility = Wpf.Visibility.Visible;
-        ClipTitle.Text = ClipFiles.Title(file, gameName); ClipTitle.ToolTip = ClipTitle.Text;
+        ClipTitle.Text = isLinked ? Path.GetFileNameWithoutExtension(file) : ClipFiles.Title(file, gameName);
+        ClipTitle.ToolTip = ClipTitle.Text;
         PlayerPlaceholder.Text = "Loading your clip…"; PlayerPlaceholder.Visibility = Wpf.Visibility.Visible;
         SetControls(false); EditorMessage.Text = "Reading clip…";
         try
@@ -176,14 +179,14 @@ public partial class ClipEditor : C.UserControl, IDisposable
     private bool TrimChanged => info != null && (Range.Start > .0001 || Range.Duration - Range.End > .0001);
     private void UpdateSaveActions()
     {
-        TrimButton.Visibility = TrimChanged ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
-        SaveMixButton.Visibility = !Busy && !TrimChanged && info != null && CurrentMix() != info.Mix
+        TrimButton.Visibility = !isLinked && TrimChanged ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+        SaveMixButton.Visibility = !isLinked && !Busy && !TrimChanged && info != null && CurrentMix() != info.Mix
             ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
     }
     private async void Trim_Click(object sender, Wpf.RoutedEventArgs e) { if (info != null && Range.End - Range.Start >= .1) await Render(); }
     private async Task Render()
     {
-        if (Busy || info == null) return;
+        if (Busy || isLinked || info == null) return;
         var mix = CurrentMix(); double start = Range.Start, end = Range.End;
         var cts = new CancellationTokenSource(); rendering = cts;
         ExitFullscreen(); ClosePlayback();
@@ -200,8 +203,9 @@ public partial class ClipEditor : C.UserControl, IDisposable
     }
     private void SetControls(bool enabled)
     {
-        PlayButton.IsEnabled = Range.IsEnabled = TrimButton.IsEnabled = SaveMixButton.IsEnabled = DragButton.IsEnabled = RenameButton.IsEnabled = FullscreenButton.IsEnabled = enabled;
-        FavoriteButton.IsEnabled = enabled && !isFavorite;
+        PlayButton.IsEnabled = Range.IsEnabled = DragButton.IsEnabled = FullscreenButton.IsEnabled = enabled;
+        TrimButton.IsEnabled = SaveMixButton.IsEnabled = RenameButton.IsEnabled = enabled && !isLinked;
+        FavoriteButton.IsEnabled = enabled && !isLinked && !isFavorite;
         GameVolume.IsEnabled = GameEnabled.IsEnabled = enabled;
         DiscordMixer.IsEnabled = MicrophoneMixer.IsEnabled = enabled && info?.HasStems == true;
     }
@@ -214,12 +218,12 @@ public partial class ClipEditor : C.UserControl, IDisposable
     }
     private async void Favorite_Click(object sender, Wpf.RoutedEventArgs e)
     {
-        if (Busy || isFavorite) return;
+        if (Busy || isLinked || isFavorite) return;
         await MoveClip(() => ClipFiles.MoveToFavorites(path, libraryFolder, gameName), "Clip moved to Favorites.");
     }
     private void Rename_Click(object sender, Wpf.RoutedEventArgs e)
     {
-        if (Busy) return;
+        if (Busy || isLinked) return;
         NameEdit.Text = Path.GetFileNameWithoutExtension(path); NameDisplay.Visibility = Wpf.Visibility.Collapsed; NameEdit.Visibility = Wpf.Visibility.Visible; NameEdit.Focus(); NameEdit.SelectAll();
     }
     private async void Name_KeyDown(object sender, KeyEventArgs e)
@@ -242,6 +246,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
     }
     private async Task MoveClip(Func<string> move, string successMessage)
     {
+        if (isLinked) return;
         var mix = CurrentMix();
         double start = Range.Start, end = Range.End;
         string message;

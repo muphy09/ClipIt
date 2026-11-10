@@ -23,7 +23,7 @@
           <ListBox.ContextMenu>
             <ContextMenu Style="{StaticResource ClipContextMenu}" Opened="ClipMenu_Opened">
               <MenuItem Header="Copy" Click="Copy_Click" Style="{StaticResource ClipMenuItem}"/>
-              <MenuItem Header="Delete" Click="Delete_Click" Style="{StaticResource ClipMenuItem}" Foreground="#FF9C9C"/>
+              <MenuItem x:Name="DeleteMenuItem" Header="Delete" Click="Delete_Click" Style="{StaticResource ClipMenuItem}" Foreground="#FF9C9C"/>
             </ContextMenu>
           </ListBox.ContextMenu>
           <ListBox.ItemContainerStyle>
@@ -55,7 +55,7 @@
           <TextBlock x:Name="EmptyHint" Text="Save a replay, or drop MP4 clips here to add them." Foreground="#839FC3" HorizontalAlignment="Center"/>
         </StackPanel>
       </Grid>
-      <StackPanel Grid.Row="3" Margin="0,12,0,0"><TextBlock x:Name="LibraryMessage" Foreground="#9DB8DB" TextWrapping="Wrap" FontSize="12"/><TextBlock x:Name="LibraryHint" Text="Newest first. Click to edit, right-click to copy or delete, or drag to another app." Foreground="#647F9F" FontSize="11" Margin="0,6,0,0"/></StackPanel>
+      <StackPanel Grid.Row="3" Margin="0,12,0,0"><TextBlock x:Name="LibraryMessage" Foreground="#9DB8DB" TextWrapping="Wrap" FontSize="12"/><TextBlock x:Name="PortalMessage" Foreground="#F5CCA0" TextWrapping="Wrap" FontSize="12"/><TextBlock x:Name="LibraryHint" Text="Newest first. Click to edit, right-click to copy or delete, or drag to another app." Foreground="#647F9F" FontSize="11" Margin="0,6,0,0"/></StackPanel>
     </Grid>
     <local:ClipEditor x:Name="Editor" Visibility="Collapsed" BackRequested="Editor_Back" FileChanged="Editor_Changed"/>
   </Grid>

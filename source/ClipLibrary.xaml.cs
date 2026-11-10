@@ -16,7 +16,9 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromMilliseconds(900) };
     private readonly CancellationTokenSource lifetime = new();
     private FileSystemWatcher? watcher;
+    private FileSystemWatcher? portalWatcher;
     private string folder = "";
+    private string portalFolder = "";
     private int generation;
     private Wpf.Point dragStart;
     private ClipItem? mouseClip;
@@ -32,19 +34,31 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         refreshTimer.Tick += async (_, _) => { refreshTimer.Stop(); await Reload(); };
         IsVisibleChanged += async (_, _) => { if (IsVisible) await Reload(); else Editor.Pause(); };
     }
-    public void SetFolder(string value)
+    public void SetFolder(string value, string portal = "")
     {
-        if (string.Equals(folder, value, StringComparison.OrdinalIgnoreCase)) return;
-        folder = value; watcher?.Dispose(); watcher = null;
-        try
+        if (!string.Equals(folder, value, StringComparison.OrdinalIgnoreCase))
         {
-            Directory.CreateDirectory(folder);
-            watcher = new FileSystemWatcher(folder, "*.mp4") { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size, EnableRaisingEvents = true };
-            watcher.Created += Watch; watcher.Changed += Watch; watcher.Deleted += Watch; watcher.Renamed += Watch;
-            LibraryMessage.Text = "";
+            folder = value; watcher?.Dispose(); watcher = null;
+            try { Directory.CreateDirectory(folder); watcher = WatchFolder(folder, "*.mp4", NotifyFilters.FileName); }
+            catch (Exception ex) { LibraryMessage.Text = "This folder is unavailable: " + ex.Message; }
         }
-        catch (Exception ex) { LibraryMessage.Text = "This folder is unavailable: " + ex.Message; }
+        if (!string.Equals(portalFolder, portal, StringComparison.OrdinalIgnoreCase))
+        {
+            portalFolder = portal;
+            portalWatcher?.Dispose(); portalWatcher = null;
+        }
         _ = Reload();
+    }
+    private FileSystemWatcher WatchFolder(string path, string filter, NotifyFilters names)
+    {
+        var source = new FileSystemWatcher(path, filter)
+        {
+            IncludeSubdirectories = true, NotifyFilter = names | NotifyFilters.LastWrite | NotifyFilters.Size
+        };
+        source.Created += Watch; source.Changed += Watch; source.Deleted += Watch; source.Renamed += Watch;
+        try { source.EnableRaisingEvents = true; }
+        catch { source.Dispose(); throw; }
+        return source;
     }
     private void Watch(object sender, FileSystemEventArgs e)
     {
@@ -54,28 +68,58 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         catch (InvalidOperationException) { }
     }
     public void Refresh() { if (!disposed) { refreshTimer.Stop(); refreshTimer.Start(); } }
+    private static (FileInfo[] Files, string? Error) Scan(string directory)
+    {
+        try
+        {
+            return (new DirectoryInfo(directory).EnumerateFiles("*.mp4", new EnumerationOptions
+            {
+                RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint
+            }).Where(f => !f.Name.StartsWith(".clipit-", StringComparison.OrdinalIgnoreCase)).ToArray(), null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return ([], ex.Message);
+        }
+    }
     private async Task Reload()
     {
         if (disposed || folder.Length == 0) return;
-        int current = ++generation; string directory = folder;
+        int current = ++generation;
+        string directory = folder, portal = portalFolder;
         try
         {
-            var files = await Task.Run(() => new DirectoryInfo(directory).EnumerateFiles("*.mp4", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint }).Where(f => !f.Name.StartsWith(".clipit-", StringComparison.OrdinalIgnoreCase)).OrderByDescending(f => f.LastWriteTimeUtc).ToArray(), lifetime.Token);
+            var (local, linked) = await Task.Run(() =>
+                (Scan(directory), portal.Length == 0 ? (Files: Array.Empty<FileInfo>(), Error: (string?)null) : Scan(portal)), lifetime.Token);
             if (current != generation || disposed) return;
-            var next = new List<ClipItem>();
-            foreach (var f in files)
+            if (local.Error != null) LibraryMessage.Text = "Could not load clips: " + local.Error;
+            PortalMessage.Text = linked.Error == null ? "" : "Portal Clips folder is unavailable: " + linked.Error;
+            PortalMessage.Visibility = linked.Error == null ? Wpf.Visibility.Collapsed : Wpf.Visibility.Visible;
+            if (linked.Error != null) { portalWatcher?.Dispose(); portalWatcher = null; }
+            else if (portal.Length > 0 && portalWatcher == null)
             {
+                try { portalWatcher = WatchFolder(portal, "*", NotifyFilters.FileName | NotifyFilters.DirectoryName); }
+                catch (Exception ex) { Log.Write("Could not watch Portal Clips folder: " + ex.Message); }
+            }
+            var next = new Dictionary<string, ClipItem>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in local.Files.Concat(linked.Files))
+            {
+                if (next.ContainsKey(f.FullName)) continue;
+                bool isLinked = !ClipFiles.IsInLibrary(f.FullName, directory);
+                string game = isLinked ? ClipFiles.PortalGameName(f.FullName, portal) : ClipFiles.GameName(f.FullName, directory);
+                bool favorite = !isLinked && ClipFiles.IsFavorite(f.FullName, directory);
                 var stamp = new ClipStamp(f.Length, f.LastWriteTimeUtc);
-                if (!items.TryGetValue(f.FullName, out var item) || item.Stamp != stamp || item.Path != f.FullName)
-                    item = new ClipItem(f.FullName, stamp, ClipFiles.GameName(f.FullName, directory), ClipFiles.IsFavorite(f.FullName, directory));
-                next.Add(item);
+                if (!items.TryGetValue(f.FullName, out var item) || item.Stamp != stamp || item.Path != f.FullName
+                    || item.Application != game || item.IsLinked != isLinked || item.IsFavorite != favorite)
+                    item = new ClipItem(f.FullName, stamp, game, favorite, isLinked);
+                next.Add(item.Path, item);
             }
             items.Clear();
-            foreach (var item in next) items[item.Path] = item;
+            foreach (var (path, item) in next) items[path] = item;
             UpdateView();
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { LibraryMessage.Text = "Could not load clips: " + ex.Message; }
+        catch (Exception ex) { if (current == generation && !disposed) LibraryMessage.Text = "Could not load clips: " + ex.Message; }
     }
     private void UpdateView()
     {
@@ -102,7 +146,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         EmptyState.Visibility = (folders ? games.Length == 0 : clips.Count == 0) ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
         EmptyTitle.Text = favorites ? "No favorites yet." : selectedGame != null && byGame ? "No clips in this game yet." : "Your next highlight lives here.";
         EmptyHint.Text = favorites ? "Open a clip and choose Mark as Favorite to add it here." : "Save a replay, or drop MP4 clips here to add them.";
-        LibraryHint.Text = folders ? "Games A–Z. Open a folder to see its clips." : "Newest first. Click to edit, right-click to copy or delete, or drag to another app.";
+        LibraryHint.Text = folders ? "Games A–Z. Open a folder to see its clips." : "Newest first. Click to open, right-click for options, or drag to another app.";
     }
     private void Tab_Changed(object sender, Wpf.RoutedEventArgs e) => UpdateView();
     private void Games_Back(object sender, Wpf.RoutedEventArgs e) { selectedGame = null; UpdateView(); }
@@ -130,6 +174,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         menu.Tag = menuClip ?? ClipsList.SelectedItem;
         menuClip = null;
         if (menu.Tag is not ClipItem item || deleting.Contains(item.Path) || Editor.Busy) menu.IsOpen = false;
+        else DeleteMenuItem.IsEnabled = !item.IsLinked;
     }
     private ClipItem? MenuClip => ClipsList.ContextMenu.Tag as ClipItem;
     private void Copy_Click(object sender, Wpf.RoutedEventArgs e)
@@ -145,7 +190,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     }
     private async void Delete_Click(object sender, Wpf.RoutedEventArgs e)
     {
-        if (MenuClip is not ClipItem item || Editor.Busy || !deleting.Add(item.Path)) return;
+        if (MenuClip is not ClipItem { IsLinked: false } item || Editor.Busy || !deleting.Add(item.Path)) return;
         try
         {
             if (item.PreviewTask is { IsCompleted: false } preview)
@@ -195,7 +240,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         if (Editor.Busy || deleting.Contains(path)) return;
         if (items.TryGetValue(path, out var item)) item.PreviewCancellation?.Cancel();
         Dashboard.Visibility = Wpf.Visibility.Collapsed; Editor.Visibility = Wpf.Visibility.Visible;
-        await Editor.Open(path, folder);
+        await Editor.Open(path, folder, item is { IsLinked: true } ? item.Application : null);
     }
     public void ShowDashboard()
     {
@@ -279,7 +324,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         catch { return false; }
     }
     public void PausePlayback() => Editor.Suspend();
-    public void Dispose() { disposed = true; ++generation; lifetime.Cancel(); watcher?.Dispose(); refreshTimer.Stop(); Editor.Dispose(); }
+    public void Dispose() { disposed = true; ++generation; lifetime.Cancel(); watcher?.Dispose(); portalWatcher?.Dispose(); refreshTimer.Stop(); Editor.Dispose(); }
 
     private sealed class ClipItem : INotifyPropertyChanged
     {
@@ -287,6 +332,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         public ClipStamp Stamp { get; }
         public string Application { get; }
         public bool IsFavorite { get; }
+        public bool IsLinked { get; }
         public string Title { get; }
         public string Date => Stamp.Modified.ToLocalTime().ToString("MMM d, yyyy  ·  h:mm tt");
         public string Detail { get; private set; }
@@ -295,10 +341,10 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         public CancellationTokenSource? PreviewCancellation;
         public bool Read;
         public event PropertyChangedEventHandler? PropertyChanged;
-        public ClipItem(string path, ClipStamp stamp, string application, bool isFavorite)
+        public ClipItem(string path, ClipStamp stamp, string application, bool isFavorite, bool isLinked)
         {
-            Path = path; Stamp = stamp; Application = application; IsFavorite = isFavorite;
-            Title = ClipFiles.Title(path, application);
+            Path = path; Stamp = stamp; Application = application; IsFavorite = isFavorite; IsLinked = isLinked;
+            Title = isLinked ? System.IO.Path.GetFileNameWithoutExtension(path) : ClipFiles.Title(path, application);
             Detail = $"{stamp.Size / 1048576.0:0.#} MB  ·  Loading preview…";
         }
         public void SetInfo(ClipInfo info, BitmapImage image) { Read = true; Thumbnail = image; Detail = $"{MediaTools.Time(info.Duration)}  ·  {info.Width} × {info.Height}  ·  {info.Size / 1048576.0:0.#} MB"; PropertyChanged?.Invoke(this, new(nameof(Thumbnail))); PropertyChanged?.Invoke(this, new(nameof(Detail))); }

@@ -69,6 +69,8 @@ public partial class ClipWindow : Wpf.Window
         RamBufferToggle.Checked += GeneralSetting_Changed; RamBufferToggle.Unchecked += GeneralSetting_Changed;
         recorder = new(settings);
         FolderBox.Text = settings.Folder;
+        PortalFolderBox.Text = settings.PortalFolder;
+        ClearPortalButton.IsEnabled = PortalFolderBox.Text.Length > 0;
         ShortcutBox.Text = settings.Shortcut.Replace("+", " + ");
         LibraryShortcutBox.Text = settings.LibraryShortcut.Replace("+", " + ");
         var screens = Forms.Screen.AllScreens;
@@ -359,7 +361,7 @@ public partial class ClipWindow : Wpf.Window
             if (changedKey) { if (registered) Win32.UnregisterHotKey(handle, hotkeyId); hotkeyId = newId; registered = true; }
             settings = updated; recorder.Settings = updated; recorder.Restart();
             _ = UpdateBufferDriveWarning();
-            library?.SetFolder(updated.Folder);
+            library?.SetFolder(updated.Folder, updated.PortalFolder);
             populating = true; FolderBox.Text = settings.Folder; populating = false;
             captureBaseline = CaptureSelection(); MarkDirty(); ClearNotices();
         }
@@ -443,13 +445,34 @@ public partial class ClipWindow : Wpf.Window
         if (dialog.ShowDialog(new OwnerWindow(handle)) == Forms.DialogResult.OK) FolderBox.Text = dialog.SelectedPath;
     }
     private void OpenFolder_Click(object sender, Wpf.RoutedEventArgs e) => OpenFolder();
+    private void BrowsePortal_Click(object sender, Wpf.RoutedEventArgs e)
+    {
+        using var dialog = new Forms.FolderBrowserDialog
+        {
+            Description = "Choose a Portal Clips folder", UseDescriptionForTitle = true,
+            SelectedPath = PortalFolderBox.Text, ShowNewFolderButton = false
+        };
+        if (dialog.ShowDialog(new OwnerWindow(handle)) == Forms.DialogResult.OK) SavePortalFolder(dialog.SelectedPath);
+    }
+    private void ClearPortal_Click(object sender, Wpf.RoutedEventArgs e) => SavePortalFolder("");
+    private void SavePortalFolder(string path)
+    {
+        var updated = settings with { PortalFolder = path };
+        try { updated.Save(); }
+        catch (Exception ex) { GeneralSettingsStatus.Text = "Could not save Portal Clips: " + ex.Message; return; }
+        settings = updated; recorder.Settings = updated;
+        PortalFolderBox.Text = path;
+        ClearPortalButton.IsEnabled = path.Length > 0;
+        library?.SetFolder(updated.Folder, updated.PortalFolder);
+        GeneralSettingsStatus.Text = path.Length > 0 ? "Portal Clips folder linked." : "Portal Clips folder link cleared.";
+    }
     private void Library_Click(object sender, Wpf.RoutedEventArgs e) => ShowLibrary();
     private void ShowLibrary()
     {
         ClearNotices();
         ShowSettings();
         if (library == null) { library = new ClipLibrary(); LibraryHost.Child = library; }
-        library.SetFolder(settings.Folder);
+        library.SetFolder(settings.Folder, settings.PortalFolder);
         library.ShowDashboard();
         CapturePanel.Visibility = Wpf.Visibility.Collapsed; LibraryHost.Visibility = Wpf.Visibility.Visible;
         GeneralSettingsPanel.Visibility = Wpf.Visibility.Collapsed;

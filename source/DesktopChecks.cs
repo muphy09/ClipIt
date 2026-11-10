@@ -112,6 +112,22 @@ internal static class DesktopChecks
                 bitrate.Text = "24"; replayLength.SelectedIndex = 0;
                 ((C.Button)window.FindName("ApplyButton")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
                 Require(Settings.Load().ReplaySeconds == 30 && estimate.Text == shortEstimate, "Replay length and estimate return to the thirty-second configuration");
+                string portalRoot = Path.Combine(data, "portal");
+                string portalGame = Path.Combine(portalRoot, "myGAME", "Highlights");
+                Directory.CreateDirectory(portalGame);
+                string portalClip = Path.Combine(portalGame, "Overtime.mp4");
+                File.WriteAllText(portalClip, "disposable portal fixture");
+                var portalBox = (C.TextBox)window.FindName("PortalFolderBox");
+                var settingsPanel = (C.ScrollViewer)window.FindName("GeneralSettingsPanel");
+                Require(portalBox.IsDescendantOf((Wpf.DependencyObject)settingsPanel.Content), "Portal Clips is on the Settings page");
+                typeof(ClipWindow).GetMethod("SavePortalFolder", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [portalRoot]);
+                Require(portalBox.Text == portalRoot && Settings.Load().PortalFolder == portalRoot
+                    && Settings.Load().Folder == savedFolder && pendingBar.Visibility == Wpf.Visibility.Collapsed,
+                    "Linking a Portal Clips folder saves immediately without a capture settings change");
+                var clearPortal = (C.Button)window.FindName("ClearPortalButton");
+                clearPortal.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                Require(portalBox.Text == "" && Settings.Load().PortalFolder == "" && !clearPortal.IsEnabled,
+                    "Clearing Portal Clips removes the saved link immediately");
                 typeof(ClipWindow).GetMethod("Tick", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, null);
                 Require(((C.TextBlock)window.FindName("ReplayLengthLabel")).Text == "Replay Length: 0:30" && window.FindName("ReplayBadge") == null, "Sidebar shows the applied replay length and Capture has no replay badge");
                 var quality = (C.ComboBox)window.FindName("QualityBox");
@@ -206,6 +222,26 @@ internal static class DesktopChecks
                     var list = (C.ListBox)testLibrary.FindName("ClipsList");
                     for (int i = 0; i < 40 && list.Items.Count == 0; i++) await Task.Delay(50);
                     Require(list.Items.Count == 1 && (string?)list.Items[0].GetType().GetProperty("Application")?.GetValue(list.Items[0]) == "Rocket League", "Existing rocketleague folders display as Rocket League");
+                    testLibrary.SetFolder(libraryRoot, portalRoot);
+                    for (int i = 0; i < 40 && list.Items.Count != 2; i++) await Task.Delay(50);
+                    Require(list.Items.Count == 2, "Your Clips lists local and linked clips together");
+                    ((C.RadioButton)testLibrary.FindName("ByGameTab")).IsChecked = true;
+                    var games = (C.ListBox)testLibrary.FindName("GamesList");
+                    Require(games.Items.Count == 2 && (string?)games.Items[0].GetType().GetProperty("Name")?.GetValue(games.Items[0]) == "myGAME",
+                        "By Game uses the exact top-level folder name for nested linked clips and sorts it A–Z");
+                    testLibrary.ShowRecent();
+                    await testLibrary.OpenClip(portalClip);
+                    var portalEditor = (ClipEditor)testLibrary.FindName("Editor");
+                    Require(((C.TextBlock)portalEditor.FindName("ClipTitle")).Text == "Overtime"
+                        && !((C.Button)portalEditor.FindName("RenameButton")).IsEnabled
+                        && !((C.Button)portalEditor.FindName("FavoriteButton")).IsEnabled,
+                        "Linked clips open from their source location with file changes disabled");
+                    testLibrary.ShowDashboard();
+                    testLibrary.SetFolder(libraryRoot, Path.Combine(data, "unavailable"));
+                    for (int i = 0; i < 40 && list.Items.Count != 1; i++) await Task.Delay(50);
+                    Require(list.Items.Count == 1 && ((C.TextBlock)testLibrary.FindName("PortalMessage")).Text.Contains("unavailable"),
+                        "An unavailable linked folder leaves the local library available");
+                    testLibrary.SetFolder(libraryRoot);
                     await testLibrary.OpenClip(target);
                     var clipEditor = (ClipEditor)testLibrary.FindName("Editor");
                     var title = (C.TextBlock)clipEditor.FindName("ClipTitle");

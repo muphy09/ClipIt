@@ -25,6 +25,13 @@ internal static class ClipFiles
 
     public static string FavoritesFolder(string library) => Path.Combine(library, "Favorites");
 
+    public static string PortalGameName(string path, string portal)
+    {
+        string relative = Path.GetRelativePath(portal, path);
+        int separator = relative.IndexOf(Path.DirectorySeparatorChar);
+        return separator < 0 ? new DirectoryInfo(portal).Name : relative[..separator];
+    }
+
     public static bool IsFavorite(string path, string library) => IsInLibrary(path, FavoritesFolder(library));
 
     public static string GameName(string path, string library)
