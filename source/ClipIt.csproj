@@ -10,7 +10,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>ClipIt</AssemblyName>
-    <Version>0.5.8</Version>
+    <Version>0.5.9</Version>
     <Product>ClipIt</Product>
     <Description>Instant replay, always within reach.</Description>
     <ApplicationIcon>Assets\ClipIt.ico</ApplicationIcon>
