@@ -232,10 +232,23 @@ internal static class DesktopChecks
                     testLibrary.ShowRecent();
                     await testLibrary.OpenClip(portalClip);
                     var portalEditor = (ClipEditor)testLibrary.FindName("Editor");
+                    var portalFavorite = (C.Button)portalEditor.FindName("FavoriteButton");
                     Require(((C.TextBlock)portalEditor.FindName("ClipTitle")).Text == "Overtime"
                         && !((C.Button)portalEditor.FindName("RenameButton")).IsEnabled
-                        && !((C.Button)portalEditor.FindName("FavoriteButton")).IsEnabled,
-                        "Linked clips open from their source location with file changes disabled");
+                        && portalFavorite.IsEnabled,
+                        "Linked clips allow favorites while keeping file edits disabled");
+                    portalFavorite.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                    testLibrary.ShowDashboard();
+                    ((C.RadioButton)testLibrary.FindName("FavoritesTab")).IsChecked = true;
+                    for (int i = 0; i < 40 && list.Items.Count != 1; i++) await Task.Delay(50);
+                    Require(list.Items.Count == 1 && File.ReadAllText(portalClip) == "disposable portal fixture"
+                        && Directory.GetFiles(portalGame).Length == 1 && ClipFiles.IsFavorite(portalClip, libraryRoot),
+                        "A Portal clip appears in Favorites without changing files in the linked folder");
+                    await testLibrary.OpenClip(portalClip);
+                    Require((string)portalFavorite.Content == "Remove from Favorites", "Reopening a Portal clip restores its saved favorite status");
+                    portalFavorite.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                    testLibrary.ShowRecent();
+                    Require(!ClipFiles.IsFavorite(portalClip, libraryRoot) && File.Exists(portalClip), "Removing a Portal favorite leaves the source file in place");
                     testLibrary.ShowDashboard();
                     testLibrary.SetFolder(libraryRoot, Path.Combine(data, "unavailable"));
                     for (int i = 0; i < 40 && list.Items.Count != 1; i++) await Task.Delay(50);
@@ -270,14 +283,13 @@ internal static class DesktopChecks
                     var editorActions = (C.StackPanel)favoriteButton.Parent;
                     Require((string)favoriteButton.Content == "Mark as Favorite" && editorActions.Children[1] == clipEditor.FindName("ExplorerButton"), "Mark as Favorite sits before Open in Explorer");
                     favoriteButton.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
-                    string favoritePath = Path.Combine(libraryRoot, "Favorites", "Overtime goal.mp4");
-                    Require(File.Exists(favoritePath) && !File.Exists(renamed) && title.Text == "Overtime goal" && !favoriteButton.IsEnabled,
-                        "Marking a clip moves its file, preserves its custom title, and prevents a repeated move");
+                    Require(File.Exists(renamed) && title.Text == "Overtime goal" && (string)favoriteButton.Content == "Remove from Favorites",
+                        "Marking a clip keeps its file and title in place and allows removing the mark");
                     testLibrary.ShowDashboard();
                     for (int i = 0; i < 40 && ListTitle() != "Overtime goal"; i++) await Task.Delay(50);
-                    Require(ListTitle() == "Overtime goal" && ClipFiles.GameName(favoritePath, libraryRoot) == "Rocket League", "Favorites shows the moved clip and preserves its original game");
+                    Require(ListTitle() == "Overtime goal" && ClipFiles.GameName(renamed, libraryRoot) == "Rocket League", "Favorites shows the marked clip and preserves its original game");
                     ((C.RadioButton)testLibrary.FindName("ByGameTab")).IsChecked = true;
-                    Require(((C.ListBox)testLibrary.FindName("GamesList")).Items.Count == 0, "The moved clip no longer appears in its By Game folder");
+                    Require(((C.ListBox)testLibrary.FindName("GamesList")).Items.Count == 1, "The favorite still appears in its By Game folder");
                     ((C.RadioButton)testLibrary.FindName("RecentTab")).IsChecked = true;
                     Require(ListTitle() == "Overtime goal", "Recent still includes the favorited clip once");
                     favoritesTab.IsChecked = true;
@@ -286,22 +298,28 @@ internal static class DesktopChecks
                     testLibrary.Refresh();
                     for (int i = 0; i < 40 && list.SelectedItem != null; i++) await Task.Delay(50);
                     ((C.MenuItem)list.ContextMenu.Items[1]).RaiseEvent(new Wpf.RoutedEventArgs(C.MenuItem.ClickEvent));
-                    for (int i = 0; i < 40 && (File.Exists(favoritePath) || list.Items.Count != 0); i++) await Task.Delay(50);
-                    Require(!File.Exists(favoritePath) && list.Items.Count == 0, "One Delete removes the selected favorite after a library refresh clears the selection");
+                    for (int i = 0; i < 40 && (File.Exists(renamed) || list.Items.Count != 0); i++) await Task.Delay(50);
+                    Require(!File.Exists(renamed) && list.Items.Count == 0 && !ClipFiles.IsFavorite(renamed, libraryRoot),
+                        "One Delete removes the selected clip and its favorite mark after a library refresh clears the selection");
 
-                    string duplicate = Path.Combine(gameFolder, "highlight.mp4");
-                    File.WriteAllText(duplicate, "first");
-                    string firstFavorite = ClipFiles.MoveToFavorites(duplicate, libraryRoot, "Rocket League");
-                    File.WriteAllText(duplicate, "second");
-                    string secondFavorite = ClipFiles.MoveToFavorites(duplicate, libraryRoot, "Rocket League");
-                    Require(firstFavorite != secondFavorite && File.ReadAllText(firstFavorite) == "first" && File.ReadAllText(secondFavorite) == "second",
-                        "Favorites keeps both files when their original filenames match");
-                    Require(ClipFiles.Title(secondFavorite, ClipFiles.GameName(secondFavorite, libraryRoot)) == "Rocket League",
-                        "An unrenamed favorite still displays its game as its title");
-                    string renamedFavorite = Path.Combine(Path.GetDirectoryName(secondFavorite)!, "Second goal.mp4");
-                    ClipFiles.Rename(secondFavorite, renamedFavorite);
-                    Require(ClipFiles.GameName(renamedFavorite, libraryRoot) == "Rocket League" && ClipFiles.Title(renamedFavorite, "Rocket League") == "Second goal",
-                        "Renaming a favorite preserves its game and updates its custom title");
+                    string localFavorite = Path.Combine(gameFolder, Path.GetFileName(portalClip));
+                    File.WriteAllText(localFavorite, "local copy");
+                    ClipFiles.SetFavorite(localFavorite, true);
+                    Require(!ClipFiles.IsFavorite(portalClip, libraryRoot), "Files with matching names in different folders have independent favorite marks");
+                    string renamedFavorite = Path.Combine(gameFolder, "Second goal.mp4");
+                    ClipFiles.Rename(localFavorite, renamedFavorite);
+                    Require(ClipFiles.IsFavorite(renamedFavorite, libraryRoot) && !ClipFiles.IsFavorite(localFavorite, libraryRoot)
+                        && ClipFiles.Title(renamedFavorite, "Rocket League") == "Second goal", "Renaming a favorite keeps its mark with the renamed clip");
+
+                    string legacyFolder = Path.Combine(libraryRoot, "Favorites");
+                    Directory.CreateDirectory(legacyFolder);
+                    string legacyClip = Path.Combine(legacyFolder, "Legacy clip.mp4");
+                    File.WriteAllText(legacyClip, "legacy favorite");
+                    Require(ClipFiles.IsFavorite(legacyClip, libraryRoot), "Favorites from the previous storage layout remain visible");
+                    ClipFiles.SetFavorite(legacyClip, false);
+                    Require(!ClipFiles.IsFavorite(legacyClip, libraryRoot) && File.Exists(legacyClip), "An existing favorite can be unmarked in place");
+                    Require(MediaTools.Gigabytes(1048576000).EndsWith(" GB") && MediaTools.Gigabytes(100).StartsWith("<"),
+                        "Clip size uses GB and shows very small files as below the display threshold");
                 }
 
                 var overlay = new RecordingOverlay();

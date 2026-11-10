@@ -63,9 +63,9 @@ public partial class ClipEditor : C.UserControl, IDisposable
         loading?.Cancel(); loading?.Dispose(); loading = new();
         ClosePlayback(); info = null; path = file; libraryFolder = library;
         isLinked = linkedGame != null;
-        isFavorite = !isLinked && ClipFiles.IsFavorite(file, library);
+        isFavorite = ClipFiles.IsFavorite(file, library);
         gameName = linkedGame ?? ClipFiles.GameName(file, library);
-        FavoriteButton.Content = isFavorite ? "Favorited" : "Mark as Favorite";
+        UpdateFavoriteButton();
         UpdateSaveActions();
         NameEdit.Visibility = Wpf.Visibility.Collapsed; NameDisplay.Visibility = Wpf.Visibility.Visible;
         ClipTitle.Text = isLinked ? Path.GetFileNameWithoutExtension(file) : ClipFiles.Title(file, gameName);
@@ -78,7 +78,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
             var read = await MediaTools.Probe(file, loading.Token);
             if (current != generation) return;
             info = read; Range.Setup(read.Duration); lastStart = 0;
-            ClipDetails.Text = $"{read.Width} × {read.Height}  ·  {MediaTools.Time(read.Duration)}  ·  {read.Size / 1048576.0:0.#} MB";
+            ClipDetails.Text = $"{read.Width} × {read.Height}  ·  {MediaTools.Time(read.Duration)}  ·  {MediaTools.Gigabytes(read.Size)}";
             DurationLabel.Text = MediaTools.Time(read.Duration);
             loadingMix = true;
             GameVolume.Value = Math.Clamp(read.Mix.Game, 0, 1); DiscordVolume.Value = Math.Clamp(read.Mix.Discord, 0, 1); MicrophoneVolume.Value = Math.Clamp(read.Mix.Microphone, 0, 1);
@@ -101,7 +101,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
             SetControls(true); ApplyVolumes(); UpdateSaveActions(); timer.Start(); ShowOverlay();
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { if (current == generation) { PlayerPlaceholder.Text = "This clip couldn't be prepared."; EditorMessage.Text = ex.Message; } }
+        catch (Exception ex) { if (current == generation) { PlayerPlaceholder.Text = "This clip couldn't be prepared."; EditorMessage.Text = ex.Message; FavoriteButton.IsEnabled = File.Exists(file); } }
     }
 
     private MixSettings CurrentMix() => new(GameVolume.Value, DiscordVolume.Value, MicrophoneVolume.Value, GameEnabled.IsChecked != true, DiscordEnabled.IsChecked != true, MicrophoneEnabled.IsChecked != true);
@@ -205,7 +205,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
     {
         PlayButton.IsEnabled = Range.IsEnabled = DragButton.IsEnabled = FullscreenButton.IsEnabled = enabled;
         TrimButton.IsEnabled = SaveMixButton.IsEnabled = RenameButton.IsEnabled = enabled && !isLinked;
-        FavoriteButton.IsEnabled = enabled && !isLinked && !isFavorite;
+        FavoriteButton.IsEnabled = enabled;
         GameVolume.IsEnabled = GameEnabled.IsEnabled = enabled;
         DiscordMixer.IsEnabled = MicrophoneMixer.IsEnabled = enabled && info?.HasStems == true;
     }
@@ -216,10 +216,18 @@ public partial class ClipEditor : C.UserControl, IDisposable
         try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true }); }
         catch (Exception ex) { EditorMessage.Text = ex.Message; }
     }
-    private async void Favorite_Click(object sender, Wpf.RoutedEventArgs e)
+    private void UpdateFavoriteButton() => FavoriteButton.Content = isFavorite ? "Remove from Favorites" : "Mark as Favorite";
+
+    private void Favorite_Click(object sender, Wpf.RoutedEventArgs e)
     {
-        if (Busy || isLinked || isFavorite) return;
-        await MoveClip(() => ClipFiles.MoveToFavorites(path, libraryFolder, gameName), "Clip moved to Favorites.");
+        if (Busy || !File.Exists(path)) return;
+        bool marked = !isFavorite;
+        try { ClipFiles.SetFavorite(path, marked); }
+        catch (Exception ex) { EditorMessage.Text = "Could not save favorite: " + ex.Message; return; }
+        isFavorite = marked;
+        UpdateFavoriteButton();
+        EditorMessage.Text = marked ? "Clip added to Favorites." : "Clip removed from Favorites.";
+        FileChanged?.Invoke(this, path);
     }
     private void Rename_Click(object sender, Wpf.RoutedEventArgs e)
     {

@@ -23,7 +23,7 @@ internal static class ClipFiles
         return separator < 0 ? "Unsorted" : relative[..separator];
     }
 
-    public static string FavoritesFolder(string library) => Path.Combine(library, "Favorites");
+    private static bool IsLegacyFavorite(string path, string library) => IsInLibrary(path, Path.Combine(library, "Favorites"));
 
     public static string PortalGameName(string path, string portal)
     {
@@ -32,11 +32,36 @@ internal static class ClipFiles
         return separator < 0 ? new DirectoryInfo(portal).Name : relative[..separator];
     }
 
-    public static bool IsFavorite(string path, string library) => IsInLibrary(path, FavoritesFolder(library));
+    public static bool IsFavorite(string path, string library)
+    {
+        string marker = FavoritePath(path);
+        try
+        {
+            if (File.Exists(marker) && bool.TryParse(File.ReadAllText(marker), out bool marked)) return marked;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Write("Could not read clip's favorite status: " + ex.Message);
+        }
+        return IsLegacyFavorite(path, library);
+    }
+
+    public static void SetFavorite(string path, bool favorite)
+    {
+        string marker = FavoritePath(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+        string temporary = marker + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, favorite.ToString());
+            File.Move(temporary, marker, overwrite: true);
+        }
+        finally { RemoveMarker(temporary); }
+    }
 
     public static string GameName(string path, string library)
     {
-        if (!IsFavorite(path, library)) return DisplayApplication(Application(path, library));
+        if (!IsLegacyFavorite(path, library)) return DisplayApplication(Application(path, library));
         try
         {
             string marker = LabelPath(path, "game");
@@ -72,41 +97,29 @@ internal static class ClipFiles
 
     public static void Rename(string path, string destination)
     {
-        string gameMarker = LabelPath(path, "game");
-        Move(path, destination, renamed: true, game: File.Exists(gameMarker) ? File.ReadAllText(gameMarker) : null);
-    }
-
-    public static string MoveToFavorites(string path, string library, string game)
-    {
-        string folder = FavoritesFolder(library);
-        Directory.CreateDirectory(folder);
-        string destination = Path.Combine(folder, Path.GetFileName(path));
-        string name = Path.GetFileNameWithoutExtension(path);
-        string extension = Path.GetExtension(path);
-        for (int n = 2; Path.Exists(destination) || File.Exists(LabelPath(destination, "game")); n++)
-            destination = Path.Combine(folder, $"{name} ({n}){extension}");
-        Move(path, destination, renamed: File.Exists(LabelPath(path, "title")), game);
-        return destination;
-    }
-
-    private static void Move(string path, string destination, bool renamed, string? game)
-    {
+        string oldGameMarker = LabelPath(path, "game");
+        string oldFavoriteMarker = FavoritePath(path);
         string titleMarker = LabelPath(destination, "title");
         string gameMarker = LabelPath(destination, "game");
+        string favoriteMarker = FavoritePath(destination);
         bool samePath = string.Equals(path, destination, StringComparison.OrdinalIgnoreCase);
-        bool createdTitle = false, createdGame = false;
+        bool createdTitle = false, createdGame = false, createdFavorite = false;
         try
         {
-            if (renamed && !File.Exists(titleMarker))
+            if (!File.Exists(titleMarker))
             {
                 using var file = File.Open(titleMarker, FileMode.CreateNew);
                 createdTitle = true;
             }
-            if (game != null && !samePath)
+            if (!samePath && File.Exists(oldGameMarker))
             {
-                using var file = new StreamWriter(File.Open(gameMarker, FileMode.CreateNew));
+                File.Copy(oldGameMarker, gameMarker);
                 createdGame = true;
-                file.Write(game);
+            }
+            if (!samePath && File.Exists(oldFavoriteMarker))
+            {
+                File.Copy(oldFavoriteMarker, favoriteMarker);
+                createdFavorite = true;
             }
             File.Move(path, destination, overwrite: false);
         }
@@ -114,6 +127,7 @@ internal static class ClipFiles
         {
             if (createdTitle) RemoveMarker(titleMarker);
             if (createdGame) RemoveMarker(gameMarker);
+            if (createdFavorite) RemoveMarker(favoriteMarker);
             throw;
         }
         if (!samePath) RemoveLabels(path);
@@ -123,6 +137,7 @@ internal static class ClipFiles
     {
         RemoveMarker(LabelPath(path, "title"));
         RemoveMarker(LabelPath(path, "game"));
+        RemoveMarker(FavoritePath(path));
     }
 
     private static void RemoveMarker(string marker)
@@ -139,5 +154,12 @@ internal static class ClipFiles
     {
         string key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFileName(path).ToUpperInvariant())));
         return Path.Combine(Path.GetDirectoryName(path)!, ".clipit-" + kind + "-" + key);
+    }
+
+    // Favorites live in app data so linked clips can be marked on read-only drives.
+    private static string FavoritePath(string path)
+    {
+        string key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant())));
+        return Path.Combine(Settings.DataDirectory, "favorites", key);
     }
 }

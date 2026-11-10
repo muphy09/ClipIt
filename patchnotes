@@ -1,3 +1,10 @@
+## [v0.6.3]
+
+### What's New
+- Portal clips can now be marked as favorite
+- Size of clips are now in GB if > 1000 MB and rounded
+
+
 ## [v0.6.2]
 
 ### What's New

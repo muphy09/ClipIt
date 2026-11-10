@@ -107,11 +107,12 @@ public partial class ClipLibrary : C.UserControl, IDisposable
                 if (next.ContainsKey(f.FullName)) continue;
                 bool isLinked = !ClipFiles.IsInLibrary(f.FullName, directory);
                 string game = isLinked ? ClipFiles.PortalGameName(f.FullName, portal) : ClipFiles.GameName(f.FullName, directory);
-                bool favorite = !isLinked && ClipFiles.IsFavorite(f.FullName, directory);
+                bool favorite = ClipFiles.IsFavorite(f.FullName, directory);
                 var stamp = new ClipStamp(f.Length, f.LastWriteTimeUtc);
                 if (!items.TryGetValue(f.FullName, out var item) || item.Stamp != stamp || item.Path != f.FullName
-                    || item.Application != game || item.IsLinked != isLinked || item.IsFavorite != favorite)
+                    || item.Application != game || item.IsLinked != isLinked)
                     item = new ClipItem(f.FullName, stamp, game, favorite, isLinked);
+                else item.IsFavorite = favorite;
                 next.Add(item.Path, item);
             }
             items.Clear();
@@ -124,13 +125,14 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private void UpdateView()
     {
         if (GamesList == null) return; // Checked can fire while XAML is still loading.
-        double megabytes = items.Values.Sum(c => c.Stamp.Size) / 1048576.0;
-        string size = megabytes > 1000 ? $"{megabytes / 1000:0.00} GB" : $"{megabytes:0.#} MB";
+        long bytes = items.Values.Sum(c => c.Stamp.Size);
+        double megabytes = bytes / 1048576.0;
+        string size = megabytes > 1000 ? MediaTools.Gigabytes(bytes) : $"{megabytes:0.#} MB";
         SummaryLabel.Text = $"{items.Count} {(items.Count == 1 ? "clip" : "clips")}  ·  {size}  ·  Newest first";
         bool byGame = ByGameTab.IsChecked == true;
         bool favorites = FavoritesTab.IsChecked == true;
         var ordered = items.Values.OrderByDescending(c => c.Stamp.Modified).ThenBy(c => c.Path, StringComparer.OrdinalIgnoreCase).ToArray();
-        var games = ordered.Where(c => !c.IsFavorite).GroupBy(c => c.Application, StringComparer.OrdinalIgnoreCase)
+        var games = ordered.GroupBy(c => c.Application, StringComparer.OrdinalIgnoreCase)
             .Select(g => new GameFolder(g.Key, g.Count())).OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToArray();
         bool folders = byGame && selectedGame == null;
         GamesList.ItemsSource = games;
@@ -140,7 +142,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         GameTitle.Text = selectedGame ?? "";
         clips.Clear();
         var visibleClips = favorites ? ordered.Where(c => c.IsFavorite)
-            : byGame ? ordered.Where(c => !c.IsFavorite && string.Equals(c.Application, selectedGame, StringComparison.OrdinalIgnoreCase))
+            : byGame ? ordered.Where(c => string.Equals(c.Application, selectedGame, StringComparison.OrdinalIgnoreCase))
             : ordered;
         foreach (var item in visibleClips) clips.Add(item);
         EmptyState.Visibility = (folders ? games.Length == 0 : clips.Count == 0) ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
@@ -232,7 +234,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
             item.SetInfo(info, image);
         }
         catch (OperationCanceledException) { }
-        catch { item.SetDetail("Preview unavailable · click to retry playback"); }
+        catch { item.SetDetail($"{MediaTools.Gigabytes(item.Stamp.Size)}  ·  Preview unavailable · click to retry playback"); }
         finally { item.PreviewCancellation = null; }
     }
     public async Task OpenClip(string path)
@@ -331,7 +333,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         public string Path { get; }
         public ClipStamp Stamp { get; }
         public string Application { get; }
-        public bool IsFavorite { get; }
+        public bool IsFavorite { get; set; }
         public bool IsLinked { get; }
         public string Title { get; }
         public string Date => Stamp.Modified.ToLocalTime().ToString("MMM d, yyyy  ·  h:mm tt");
@@ -345,9 +347,9 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         {
             Path = path; Stamp = stamp; Application = application; IsFavorite = isFavorite; IsLinked = isLinked;
             Title = isLinked ? System.IO.Path.GetFileNameWithoutExtension(path) : ClipFiles.Title(path, application);
-            Detail = $"{stamp.Size / 1048576.0:0.#} MB  ·  Loading preview…";
+            Detail = $"{MediaTools.Gigabytes(stamp.Size)}  ·  Loading preview…";
         }
-        public void SetInfo(ClipInfo info, BitmapImage image) { Read = true; Thumbnail = image; Detail = $"{MediaTools.Time(info.Duration)}  ·  {info.Width} × {info.Height}  ·  {info.Size / 1048576.0:0.#} MB"; PropertyChanged?.Invoke(this, new(nameof(Thumbnail))); PropertyChanged?.Invoke(this, new(nameof(Detail))); }
+        public void SetInfo(ClipInfo info, BitmapImage image) { Read = true; Thumbnail = image; Detail = $"{MediaTools.Time(info.Duration)}  ·  {info.Width} × {info.Height}  ·  {MediaTools.Gigabytes(info.Size)}"; PropertyChanged?.Invoke(this, new(nameof(Thumbnail))); PropertyChanged?.Invoke(this, new(nameof(Detail))); }
         public void SetDetail(string text) { Detail = text; PropertyChanged?.Invoke(this, new(nameof(Detail))); }
     }
 }

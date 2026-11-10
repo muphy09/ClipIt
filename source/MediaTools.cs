@@ -28,6 +28,12 @@ public readonly record struct ClipStamp(long Size, DateTime Modified)
 
 internal static class MediaTools
 {
+    public static string Gigabytes(long bytes)
+    {
+        double size = bytes / 1048576000.0;
+        return size is > 0 and < 0.01 ? "<0.01 GB" : $"{size:0.00} GB";
+    }
+
     private static readonly SemaphoreSlim ThumbnailSlots = new(1);
     private static readonly SemaphoreSlim MediaJobs = new(2);
     private static string Tool(string name)
