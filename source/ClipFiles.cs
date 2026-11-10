@@ -23,6 +23,25 @@ internal static class ClipFiles
         return separator < 0 ? "Unsorted" : relative[..separator];
     }
 
+    public static string FavoritesFolder(string library) => Path.Combine(library, "Favorites");
+
+    public static bool IsFavorite(string path, string library) => IsInLibrary(path, FavoritesFolder(library));
+
+    public static string GameName(string path, string library)
+    {
+        if (!IsFavorite(path, library)) return DisplayApplication(Application(path, library));
+        try
+        {
+            string marker = LabelPath(path, "game");
+            return File.Exists(marker) ? File.ReadAllText(marker) : "Unsorted";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Write("Could not read favorite clip's game: " + ex.Message);
+            return "Unsorted";
+        }
+    }
+
     public static string DisplayApplication(string application)
     {
         string name = application.Replace('_', ' ').Trim();
@@ -42,38 +61,76 @@ internal static class ClipFiles
     }
 
     public static string Title(string path, string game) =>
-        File.Exists(TitleMarker(path)) ? Path.GetFileNameWithoutExtension(path) : game;
+        File.Exists(LabelPath(path, "title")) ? Path.GetFileNameWithoutExtension(path) : game;
 
     public static void Rename(string path, string destination)
     {
-        string marker = TitleMarker(destination);
-        bool markerExists = File.Exists(marker);
-        if (!markerExists)
+        string gameMarker = LabelPath(path, "game");
+        Move(path, destination, renamed: true, game: File.Exists(gameMarker) ? File.ReadAllText(gameMarker) : null);
+    }
+
+    public static string MoveToFavorites(string path, string library, string game)
+    {
+        string folder = FavoritesFolder(library);
+        Directory.CreateDirectory(folder);
+        string destination = Path.Combine(folder, Path.GetFileName(path));
+        string name = Path.GetFileNameWithoutExtension(path);
+        string extension = Path.GetExtension(path);
+        for (int n = 2; Path.Exists(destination) || File.Exists(LabelPath(destination, "game")); n++)
+            destination = Path.Combine(folder, $"{name} ({n}){extension}");
+        Move(path, destination, renamed: File.Exists(LabelPath(path, "title")), game);
+        return destination;
+    }
+
+    private static void Move(string path, string destination, bool renamed, string? game)
+    {
+        string titleMarker = LabelPath(destination, "title");
+        string gameMarker = LabelPath(destination, "game");
+        bool samePath = string.Equals(path, destination, StringComparison.OrdinalIgnoreCase);
+        bool createdTitle = false, createdGame = false;
+        try
         {
-            using var created = File.Open(marker, FileMode.CreateNew);
+            if (renamed && !File.Exists(titleMarker))
+            {
+                using var file = File.Open(titleMarker, FileMode.CreateNew);
+                createdTitle = true;
+            }
+            if (game != null && !samePath)
+            {
+                using var file = new StreamWriter(File.Open(gameMarker, FileMode.CreateNew));
+                createdGame = true;
+                file.Write(game);
+            }
+            File.Move(path, destination, overwrite: false);
         }
-        try { File.Move(path, destination, overwrite: false); }
         catch
         {
-            if (!markerExists) RemoveTitle(destination);
+            if (createdTitle) RemoveMarker(titleMarker);
+            if (createdGame) RemoveMarker(gameMarker);
             throw;
         }
-        if (!string.Equals(path, destination, StringComparison.OrdinalIgnoreCase)) RemoveTitle(path);
+        if (!samePath) RemoveLabels(path);
     }
 
-    public static void RemoveTitle(string path)
+    public static void RemoveLabels(string path)
     {
-        try { File.Delete(TitleMarker(path)); }
+        RemoveMarker(LabelPath(path, "title"));
+        RemoveMarker(LabelPath(path, "game"));
+    }
+
+    private static void RemoveMarker(string marker)
+    {
+        try { File.Delete(marker); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Write("Could not remove custom clip title: " + ex.Message);
+            Log.Write("Could not remove clip metadata: " + ex.Message);
         }
     }
 
-    // A companion marker keeps an explicit rename across restarts and MP4 replacement during trimming.
-    private static string TitleMarker(string path)
+    // Companion markers preserve labels across restarts and MP4 replacement during trimming.
+    private static string LabelPath(string path, string kind)
     {
         string key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFileName(path).ToUpperInvariant())));
-        return Path.Combine(Path.GetDirectoryName(path)!, ".clipit-title-" + key);
+        return Path.Combine(Path.GetDirectoryName(path)!, ".clipit-" + kind + "-" + key);
     }
 }

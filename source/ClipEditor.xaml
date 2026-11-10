@@ -10,7 +10,11 @@
         <TextBox x:Name="NameEdit" Visibility="Collapsed" KeyDown="Name_KeyDown" LostKeyboardFocus="Name_Blurred" AutomationProperties.Name="Clip name"/>
         <TextBlock x:Name="ClipDetails" Style="{StaticResource MutedText}" Margin="0,3,0,0"/>
       </StackPanel>
-      <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="ExplorerButton" Content="Open in Explorer" Click="Explorer_Click" Padding="12,9"/><Button x:Name="DragButton" Content="Drag clip ↗" PreviewMouseLeftButtonDown="Drag_Down" PreviewMouseMove="Drag_Move" ToolTip="Drag this saved file into another app or folder." Padding="12,9" Margin="8,0,0,0"/></StackPanel>
+      <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+        <Button x:Name="FavoriteButton" Content="Mark as Favorite" Click="Favorite_Click" Padding="12,9" Margin="0,0,8,0"/>
+        <Button x:Name="ExplorerButton" Content="Open in Explorer" Click="Explorer_Click" Padding="12,9"/>
+        <Button x:Name="DragButton" Content="Drag clip ↗" PreviewMouseLeftButtonDown="Drag_Down" PreviewMouseMove="Drag_Move" ToolTip="Drag this saved file into another app or folder." Padding="12,9" Margin="8,0,0,0"/>
+      </StackPanel>
     </Grid>
     <Grid x:Name="PreviewSlot" Grid.Row="1" MinHeight="160">
       <Border x:Name="PreviewSurface" Focusable="True" Background="#050910" BorderBrush="#283A53" BorderThickness="1" CornerRadius="10" ClipToBounds="True">

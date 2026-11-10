@@ -12,7 +12,9 @@ namespace ClipIt;
 public partial class ClipEditor : C.UserControl, IDisposable
 {
     private string path = "";
+    private string libraryFolder = "";
     private string gameName = "";
+    private bool isFavorite;
     private ClipInfo? info;
     private ClipStamp stamp;
     private bool playing, opened, resumeAfterSeek, loadingMix;
@@ -53,12 +55,15 @@ public partial class ClipEditor : C.UserControl, IDisposable
         IsVisibleChanged += (_, _) => { if (!IsVisible) Suspend(); };
     }
 
-    public async Task Open(string file, string application)
+    public async Task Open(string file, string library)
     {
         if (Busy) return;
         int current = ++generation;
         loading?.Cancel(); loading?.Dispose(); loading = new();
-        ClosePlayback(); info = null; path = file; gameName = application;
+        ClosePlayback(); info = null; path = file; libraryFolder = library;
+        isFavorite = ClipFiles.IsFavorite(file, library);
+        gameName = ClipFiles.GameName(file, library);
+        FavoriteButton.Content = isFavorite ? "Favorited" : "Mark as Favorite";
         UpdateSaveActions();
         NameEdit.Visibility = Wpf.Visibility.Collapsed; NameDisplay.Visibility = Wpf.Visibility.Visible;
         ClipTitle.Text = ClipFiles.Title(file, gameName); ClipTitle.ToolTip = ClipTitle.Text;
@@ -191,11 +196,12 @@ public partial class ClipEditor : C.UserControl, IDisposable
         catch (Exception ex) { EditorMessage.Text = ex.Message; Log.Write("Editor: " + ex); }
         finally { rendering = null; cts.Dispose(); BackButton.IsEnabled = true; CancelButton.Visibility = RenderProgress.Visibility = Wpf.Visibility.Collapsed; TrimButton.Content = "Save trim"; }
         string message = success ? "Trim and playback mix saved. Separate source tracks remain editable." : EditorMessage.Text;
-        await Open(path, gameName); EditorMessage.Text = message;
+        await Open(path, libraryFolder); EditorMessage.Text = message;
     }
     private void SetControls(bool enabled)
     {
         PlayButton.IsEnabled = Range.IsEnabled = TrimButton.IsEnabled = SaveMixButton.IsEnabled = DragButton.IsEnabled = RenameButton.IsEnabled = FullscreenButton.IsEnabled = enabled;
+        FavoriteButton.IsEnabled = enabled && !isFavorite;
         GameVolume.IsEnabled = GameEnabled.IsEnabled = enabled;
         DiscordMixer.IsEnabled = MicrophoneMixer.IsEnabled = enabled && info?.HasStems == true;
     }
@@ -205,6 +211,11 @@ public partial class ClipEditor : C.UserControl, IDisposable
     {
         try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true }); }
         catch (Exception ex) { EditorMessage.Text = ex.Message; }
+    }
+    private async void Favorite_Click(object sender, Wpf.RoutedEventArgs e)
+    {
+        if (Busy || isFavorite) return;
+        await MoveClip(() => ClipFiles.MoveToFavorites(path, libraryFolder, gameName), "Clip moved to Favorites.");
     }
     private void Rename_Click(object sender, Wpf.RoutedEventArgs e)
     {
@@ -221,19 +232,39 @@ public partial class ClipEditor : C.UserControl, IDisposable
         { EditorMessage.Text = "Enter a valid filename without slashes, reserved names or a trailing period."; return; }
         string next = Path.Combine(Path.GetDirectoryName(path)!, name + ".mp4");
         if (string.Equals(next, path, StringComparison.Ordinal)) { CancelRename(); return; }
-        try
+        await MoveClip(() =>
         {
             if (!string.Equals(next, path, StringComparison.OrdinalIgnoreCase) && File.Exists(next))
                 throw new IOException("A clip with that name already exists.");
-            if (ClipStamp.Read(path) != stamp) throw new IOException("This clip changed. Reopen it before renaming.");
-            var mix = CurrentMix(); double start = Range.Start, end = Range.End;
-            ClosePlayback(); ClipFiles.Rename(path, next); path = next; CancelRename(); FileChanged?.Invoke(this, next); await Open(next, gameName);
+            ClipFiles.Rename(path, next);
+            return next;
+        }, "Clip renamed.");
+    }
+    private async Task MoveClip(Func<string> move, string successMessage)
+    {
+        var mix = CurrentMix();
+        double start = Range.Start, end = Range.End;
+        string message;
+        try
+        {
+            if (ClipStamp.Read(path) != stamp) throw new IOException("This clip changed. Reopen it before trying again.");
+            ClosePlayback();
+            path = move();
+            FileChanged?.Invoke(this, path);
+            message = successMessage;
+        }
+        catch (Exception ex) { message = ex.Message; }
+        int opening = generation + 1;
+        await Open(path, libraryFolder);
+        if (generation != opening) return;
+        if (info != null)
+        {
             loadingMix = true;
             GameVolume.Value = mix.Game; DiscordVolume.Value = mix.Discord; MicrophoneVolume.Value = mix.Microphone;
             GameEnabled.IsChecked = !mix.GameMuted; DiscordEnabled.IsChecked = !mix.DiscordMuted; MicrophoneEnabled.IsChecked = !mix.MicrophoneMuted;
-            loadingMix = false; ApplyVolumes(); Range.SetRange(start, end); UpdateSaveActions(); EditorMessage.Text = "Clip renamed.";
+            loadingMix = false; ApplyVolumes(); Range.SetRange(start, end); UpdateSaveActions();
         }
-        catch (Exception ex) { await Open(path, gameName); EditorMessage.Text = ex.Message; }
+        EditorMessage.Text = message;
     }
     private void CancelRename() { NameEdit.Visibility = Wpf.Visibility.Collapsed; NameDisplay.Visibility = Wpf.Visibility.Visible; }
     private void Name_Blurred(object sender, KeyboardFocusChangedEventArgs e) { if (NameEdit.Visibility == Wpf.Visibility.Visible) CancelRename(); }
@@ -263,7 +294,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
     {
         if (NameEdit.IsKeyboardFocusWithin) return;
         if (e.Key == Key.Escape && fullscreen != null) { ExitFullscreen(); e.Handled = true; }
-        else if (e.Key == Key.Space) { TogglePlay(); e.Handled = true; }
+        else if (e.Key == Key.Space && e.OriginalSource is not C.Button) { TogglePlay(); e.Handled = true; }
         else if (e.Key == Key.F) { ToggleFullscreen(); e.Handled = true; }
     }
     private void Drag_Down(object sender, MouseButtonEventArgs e) => dragStart = e.GetPosition(this);

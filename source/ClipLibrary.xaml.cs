@@ -67,7 +67,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
             {
                 var stamp = new ClipStamp(f.Length, f.LastWriteTimeUtc);
                 if (!items.TryGetValue(f.FullName, out var item) || item.Stamp != stamp || item.Path != f.FullName)
-                    item = new ClipItem(f.FullName, stamp, ClipFiles.DisplayApplication(ClipFiles.Application(f.FullName, directory)));
+                    item = new ClipItem(f.FullName, stamp, ClipFiles.GameName(f.FullName, directory), ClipFiles.IsFavorite(f.FullName, directory));
                 next.Add(item);
             }
             items.Clear();
@@ -80,10 +80,13 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private void UpdateView()
     {
         if (GamesList == null) return; // Checked can fire while XAML is still loading.
-        SummaryLabel.Text = $"{items.Count} {(items.Count == 1 ? "clip" : "clips")}  ·  {items.Values.Sum(c => c.Stamp.Size) / 1048576.0:0.#} MB  ·  Newest first";
+        double megabytes = items.Values.Sum(c => c.Stamp.Size) / 1048576.0;
+        string size = megabytes > 1000 ? $"{megabytes / 1000:0.00} GB" : $"{megabytes:0.#} MB";
+        SummaryLabel.Text = $"{items.Count} {(items.Count == 1 ? "clip" : "clips")}  ·  {size}  ·  Newest first";
         bool byGame = ByGameTab.IsChecked == true;
+        bool favorites = FavoritesTab.IsChecked == true;
         var ordered = items.Values.OrderByDescending(c => c.Stamp.Modified).ThenBy(c => c.Path, StringComparer.OrdinalIgnoreCase).ToArray();
-        var games = ordered.GroupBy(c => c.Application, StringComparer.OrdinalIgnoreCase)
+        var games = ordered.Where(c => !c.IsFavorite).GroupBy(c => c.Application, StringComparer.OrdinalIgnoreCase)
             .Select(g => new GameFolder(g.Key, g.Count())).OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToArray();
         bool folders = byGame && selectedGame == null;
         GamesList.ItemsSource = games;
@@ -92,9 +95,13 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         GameNavigation.Visibility = byGame && selectedGame != null ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
         GameTitle.Text = selectedGame ?? "";
         clips.Clear();
-        foreach (var item in ordered.Where(c => !byGame || selectedGame == null || string.Equals(c.Application, selectedGame, StringComparison.OrdinalIgnoreCase))) clips.Add(item);
+        var visibleClips = favorites ? ordered.Where(c => c.IsFavorite)
+            : byGame ? ordered.Where(c => !c.IsFavorite && string.Equals(c.Application, selectedGame, StringComparison.OrdinalIgnoreCase))
+            : ordered;
+        foreach (var item in visibleClips) clips.Add(item);
         EmptyState.Visibility = (folders ? games.Length == 0 : clips.Count == 0) ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
-        EmptyTitle.Text = selectedGame != null && byGame ? "No clips in this game yet." : "Your next highlight lives here.";
+        EmptyTitle.Text = favorites ? "No favorites yet." : selectedGame != null && byGame ? "No clips in this game yet." : "Your next highlight lives here.";
+        EmptyHint.Text = favorites ? "Open a clip and choose Mark as Favorite to add it here." : "Save a replay, or drop MP4 clips here to add them.";
         LibraryHint.Text = folders ? "Games A–Z. Open a folder to see its clips." : "Newest first. Click to edit, right-click to copy or delete, or drag to another app.";
     }
     private void Tab_Changed(object sender, Wpf.RoutedEventArgs e) => UpdateView();
@@ -152,7 +159,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
                 if (File.Exists(item.Path))
                     Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(item.Path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
                 if (File.Exists(item.Path)) throw new IOException("The file is still in the clip folder.");
-                ClipFiles.RemoveTitle(item.Path);
+                ClipFiles.RemoveLabels(item.Path);
             });
             if (disposed) return;
             ++generation; // Ignore any directory snapshot taken before the file was removed.
@@ -186,8 +193,9 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     public async Task OpenClip(string path)
     {
         if (Editor.Busy || deleting.Contains(path)) return;
+        if (items.TryGetValue(path, out var item)) item.PreviewCancellation?.Cancel();
         Dashboard.Visibility = Wpf.Visibility.Collapsed; Editor.Visibility = Wpf.Visibility.Visible;
-        await Editor.Open(path, ClipFiles.DisplayApplication(ClipFiles.Application(path, folder)));
+        await Editor.Open(path, folder);
     }
     public void ShowDashboard()
     {
@@ -216,7 +224,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private async void Clip_MouseUp(object sender, MouseButtonEventArgs e) { var item = mouseClip; mouseClip = null; if (!dragged && item != null && File.Exists(item.Path)) await OpenClip(item.Path); }
     private async void Clip_Key(object sender, KeyEventArgs e) { if (e.Key == Key.Enter && ClipsList.SelectedItem is ClipItem item) { e.Handled = true; await OpenClip(item.Path); } }
     private void Editor_Back(object? sender, EventArgs e) => ShowDashboard();
-    private void Editor_Changed(object? sender, string e) => Refresh();
+    private void Editor_Changed(object? sender, string e) => _ = Reload();
     private void Refresh_Click(object sender, Wpf.RoutedEventArgs e) => Refresh();
     private void Folder_Click(object sender, Wpf.RoutedEventArgs e)
     {
@@ -278,6 +286,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         public string Path { get; }
         public ClipStamp Stamp { get; }
         public string Application { get; }
+        public bool IsFavorite { get; }
         public string Title { get; }
         public string Date => Stamp.Modified.ToLocalTime().ToString("MMM d, yyyy  ·  h:mm tt");
         public string Detail { get; private set; }
@@ -286,9 +295,9 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         public CancellationTokenSource? PreviewCancellation;
         public bool Read;
         public event PropertyChangedEventHandler? PropertyChanged;
-        public ClipItem(string path, ClipStamp stamp, string application)
+        public ClipItem(string path, ClipStamp stamp, string application, bool isFavorite)
         {
-            Path = path; Stamp = stamp; Application = application;
+            Path = path; Stamp = stamp; Application = application; IsFavorite = isFavorite;
             Title = ClipFiles.Title(path, application);
             Detail = $"{stamp.Size / 1048576.0:0.#} MB  ·  Loading preview…";
         }
