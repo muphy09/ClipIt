@@ -137,7 +137,7 @@ public partial class ClipWindow : Wpf.Window
         SourceInitialized += (_, _) =>
         {
             handle = new WindowInteropHelper(this).Handle;
-            source = HwndSource.FromHwnd(handle); source.AddHook(WindowMessage);
+            source = HwndSource.FromHwnd(handle); source.AddHook(WindowMessage); source.AddHook(Win32.FitMaximizedWindow);
             int enabled = 1, corners = 2;
             DwmSetWindowAttribute(handle, 20, ref enabled, sizeof(int));
             DwmSetWindowAttribute(handle, 33, ref corners, sizeof(int));
@@ -598,6 +598,7 @@ public partial class ClipWindow : Wpf.Window
         timer.Stop(); if (registered) Win32.UnregisterHotKey(handle, hotkeyId);
         if (libraryRegistered) Win32.UnregisterHotKey(handle, libraryHotkeyId);
         source?.RemoveHook(WindowMessage);
+        source?.RemoveHook(Win32.FitMaximizedWindow);
         SystemEvents.PowerModeChanged -= PowerChanged; SystemEvents.DisplaySettingsChanged -= DisplayChanged;
         recorder.Dispose(); tray.Visible = false; var icon = tray.Icon; var menu = tray.ContextMenuStrip; tray.Dispose(); icon?.Dispose(); menu?.Dispose();
         library?.Dispose();

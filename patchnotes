@@ -1,3 +1,10 @@
+## [v0.6.4]
+
+### Bugfixes
+
+- Open Folder now opens the correct file location for Portal clips
+- Fullscreen mode is no longer cut off on the bottom of the app
+
 ## [v0.6.3]
 
 ### What's New

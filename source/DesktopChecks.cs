@@ -229,7 +229,15 @@ internal static class DesktopChecks
                     var games = (C.ListBox)testLibrary.FindName("GamesList");
                     Require(games.Items.Count == 2 && (string?)games.Items[0].GetType().GetProperty("Name")?.GetValue(games.Items[0]) == "myGAME",
                         "By Game uses the exact top-level folder name for nested linked clips and sorts it A–Z");
+                    Require(testLibrary.ViewedFolder == libraryRoot, "Open folder uses the ClipIt folder at the By Game overview");
+                    var openGame = typeof(ClipLibrary).GetMethod("OpenGame", BindingFlags.NonPublic | BindingFlags.Instance)!;
+                    openGame.Invoke(testLibrary, ["Rocket League"]);
+                    Require(testLibrary.ViewedFolder == gameFolder, "Open folder uses the physical folder for a local game with a display name");
+                    openGame.Invoke(testLibrary, ["myGAME"]);
+                    Require(testLibrary.ViewedFolder == Path.Combine(portalRoot, "myGAME"),
+                        "Open folder uses the linked game's top-level folder even when its clips are nested");
                     testLibrary.ShowRecent();
+                    Require(testLibrary.ViewedFolder == libraryRoot, "Open folder uses the ClipIt folder in Recent after viewing a game");
                     await testLibrary.OpenClip(portalClip);
                     var portalEditor = (ClipEditor)testLibrary.FindName("Editor");
                     var portalFavorite = (C.Button)portalEditor.FindName("FavoriteButton");
@@ -240,6 +248,7 @@ internal static class DesktopChecks
                     portalFavorite.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
                     testLibrary.ShowDashboard();
                     ((C.RadioButton)testLibrary.FindName("FavoritesTab")).IsChecked = true;
+                    Require(testLibrary.ViewedFolder == libraryRoot, "Open folder uses the ClipIt folder in Favorites after viewing a game");
                     for (int i = 0; i < 40 && list.Items.Count != 1; i++) await Task.Delay(50);
                     Require(list.Items.Count == 1 && File.ReadAllText(portalClip) == "disposable portal fixture"
                         && Directory.GetFiles(portalGame).Length == 1 && ClipFiles.IsFavorite(portalClip, libraryRoot),
@@ -335,6 +344,63 @@ internal static class DesktopChecks
                 }
                 finally { overlay.Close(); }
 
+                var previewHost = (C.Border)window.FindName("LibraryHost");
+                var previousLibrary = previewHost.Child;
+                previewHost.Child = editor;
+                previewHost.Visibility = Wpf.Visibility.Visible;
+                var fullscreenButton = (C.Button)editor.FindName("FullscreenButton");
+                var checkUpdateButton = (C.Button)window.FindName("CheckUpdateButton");
+                var previousCheckVisibility = checkUpdateButton.Visibility;
+                checkUpdateButton.Visibility = Wpf.Visibility.Visible;
+                window.Show();
+                try
+                {
+                    void CheckBounds(Wpf.Window target, System.Drawing.Rectangle area, string description)
+                    {
+                        var frame = (Wpf.FrameworkElement)target.Content;
+                        var topLeft = frame.PointToScreen(new Wpf.Point());
+                        var bottomRight = frame.PointToScreen(new Wpf.Point(frame.ActualWidth, frame.ActualHeight));
+                        Require(target.WindowState == Wpf.WindowState.Maximized
+                            && Math.Abs(topLeft.X - area.Left) <= 1 && Math.Abs(topLeft.Y - area.Top) <= 1
+                            && Math.Abs(bottomRight.X - area.Right) <= 1 && Math.Abs(bottomRight.Y - area.Bottom) <= 1,
+                            $"{description} ({topLeft} to {bottomRight}, expected {area})");
+                    }
+                    foreach (var screen in Screen.AllScreens)
+                    {
+                        var workArea = screen.WorkingArea;
+                        const uint noZOrderOrActivation = 0x0014;
+                        if (!SetWindowPos(windowHandle, 0, workArea.Left + 20, workArea.Top + 20, workArea.Width / 2, workArea.Height / 2, noZOrderOrActivation))
+                            throw new Exception("Could not position the window on " + screen.DeviceName);
+                        await window.Dispatcher.InvokeAsync(window.UpdateLayout, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                        window.WindowState = Wpf.WindowState.Maximized;
+                        await window.Dispatcher.InvokeAsync(window.UpdateLayout, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                        CheckBounds(window, workArea, $"Maximized ClipIt fits the work area of {screen.DeviceName}");
+                        var updateTopLeft = checkUpdateButton.PointToScreen(new Wpf.Point());
+                        var updateBottomRight = checkUpdateButton.PointToScreen(new Wpf.Point(checkUpdateButton.ActualWidth, checkUpdateButton.ActualHeight));
+                        Require(checkUpdateButton.IsVisible && checkUpdateButton.ActualHeight > 0
+                            && updateTopLeft.X >= workArea.Left && updateTopLeft.Y >= workArea.Top
+                            && updateBottomRight.X <= workArea.Right && updateBottomRight.Y <= workArea.Bottom,
+                            $"Check for updates is fully inside the work area of {screen.DeviceName}");
+                        // Exercise the fullscreen button independently of whether Windows can play the test media.
+                        typeof(ClipEditor).GetField("opened", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(editor, true);
+                        fullscreenButton.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                        var preview = window.OwnedWindows.Cast<Wpf.Window>().Single(w => w.Title == "ClipIt · Fullscreen");
+                        await preview.Dispatcher.InvokeAsync(preview.UpdateLayout, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                        CheckBounds(preview, workArea, $"Fullscreen preview fits the work area of {screen.DeviceName}");
+                        fullscreenButton.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                        window.WindowState = Wpf.WindowState.Normal;
+                    }
+                }
+                finally
+                {
+                    editor.CloseMedia();
+                    checkUpdateButton.Visibility = previousCheckVisibility;
+                    previewHost.Child = previousLibrary;
+                    previewHost.Visibility = Wpf.Visibility.Collapsed;
+                    window.WindowState = Wpf.WindowState.Normal;
+                    window.Hide();
+                }
+
                 if (!recordingChecks) { exit = 0; return; }
                 var supervisor = (Supervisor)typeof(ClipWindow).GetField("recorder", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
                 for (int i = 0; i < 90 && !supervisor.Recording; i++) await Task.Delay(500);
@@ -394,4 +460,5 @@ internal static class DesktopChecks
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint hwnd, int index);
     [DllImport("user32.dll")] private static extern bool GetWindowDisplayAffinity(nint hwnd, out uint affinity);
     [DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(nint hwnd, nint after, int x, int y, int width, int height, uint flags);
 }

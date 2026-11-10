@@ -292,10 +292,19 @@ public partial class ClipEditor : C.UserControl, IDisposable
     {
         if (fullscreen != null) { ExitFullscreen(); return; }
         if (!opened || Busy) return;
-        fullscreen = new Wpf.Window { Title = "ClipIt · Fullscreen", Background = M.Brushes.Black, WindowStyle = Wpf.WindowStyle.None, ResizeMode = Wpf.ResizeMode.NoResize, ShowInTaskbar = true, Owner = Wpf.Window.GetWindow(this), WindowState = Wpf.WindowState.Maximized };
+        fullscreen = new Wpf.Window
+        {
+            Title = "ClipIt · Fullscreen", Background = M.Brushes.Black, WindowStyle = Wpf.WindowStyle.None,
+            ResizeMode = Wpf.ResizeMode.NoResize, ShowInTaskbar = true, Owner = Wpf.Window.GetWindow(this),
+            WindowStartupLocation = Wpf.WindowStartupLocation.CenterOwner, Width = 640, Height = 360
+        };
+        var preview = fullscreen;
+        preview.SourceInitialized += (_, _) =>
+            System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(preview).Handle).AddHook(Win32.FitMaximizedWindow);
         fullscreen.PreviewKeyDown += Editor_KeyDown;
         fullscreen.Closing += (_, e) => { if (fullscreen != null) { e.Cancel = true; ExitFullscreen(); } };
-        PreviewSlot.Children.Remove(PreviewSurface); fullscreen.Content = PreviewSurface; fullscreen.Show(); fullscreen.Activate(); Keyboard.Focus(PreviewSurface); ShowOverlay();
+        PreviewSlot.Children.Remove(PreviewSurface); preview.Content = PreviewSurface;
+        preview.Show(); preview.WindowState = Wpf.WindowState.Maximized; preview.Activate(); Keyboard.Focus(PreviewSurface); ShowOverlay();
     }
     private void ExitFullscreen()
     {

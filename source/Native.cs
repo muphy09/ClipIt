@@ -84,6 +84,34 @@ internal static class Obs
 
 internal static class Win32
 {
+    private const int GetMinMaxInfoMessage = 0x0024;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MinMaxInfo
+    {
+        public int ReservedX, ReservedY;
+        public int MaxWidth, MaxHeight;
+        public int MaxX, MaxY;
+        public int MinTrackWidth, MinTrackHeight;
+        public int MaxTrackWidth, MaxTrackHeight;
+    }
+
+    internal static nint FitMaximizedWindow(nint window, int message, nint wParam, nint lParam, ref bool handled)
+    {
+        if (message != GetMinMaxInfoMessage) return 0;
+        var screen = Screen.FromHandle(window);
+        // Match the visible client frame to the work area Windows reports for this monitor.
+        var workArea = screen.WorkingArea;
+        var limits = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+        limits.MaxX = workArea.Left - screen.Bounds.Left;
+        limits.MaxY = workArea.Top - screen.Bounds.Top;
+        limits.MaxWidth = workArea.Width;
+        limits.MaxHeight = workArea.Height;
+        Marshal.StructureToPtr(limits, lParam, false);
+        handled = true;
+        return 0;
+    }
+
     [DllImport("kernel32", CharSet=CharSet.Unicode, SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] internal static extern bool SetDllDirectory(string path);
     [DllImport("user32", SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] internal static extern bool RegisterHotKey(nint window, int id, uint modifiers, uint key);
     [DllImport("user32")] [return:MarshalAs(UnmanagedType.Bool)] internal static extern bool UnregisterHotKey(nint window, int id);

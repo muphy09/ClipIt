@@ -273,9 +273,31 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private void Editor_Back(object? sender, EventArgs e) => ShowDashboard();
     private void Editor_Changed(object? sender, string e) => _ = Reload();
     private void Refresh_Click(object sender, Wpf.RoutedEventArgs e) => Refresh();
+    internal string ViewedFolder
+    {
+        get
+        {
+            // A game can include clips from several locations. Use its newest clip's source.
+            if (ByGameTab.IsChecked != true || selectedGame == null || clips.FirstOrDefault() is not { } clip)
+                return folder;
+
+            string root = clip.IsLinked ? portalFolder : folder;
+            if (root.Length == 0 || !ClipFiles.IsInLibrary(clip.Path, root)) return folder;
+
+            string relative = Path.GetRelativePath(root, clip.Path);
+            int separator = relative.IndexOf(Path.DirectorySeparatorChar);
+            return separator < 0 ? root : Path.Combine(root, relative[..separator]);
+        }
+    }
     private void Folder_Click(object sender, Wpf.RoutedEventArgs e)
     {
-        try { Directory.CreateDirectory(folder); System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(folder) { UseShellExecute = true }); }
+        try
+        {
+            string target = ViewedFolder;
+            if (target == folder) Directory.CreateDirectory(folder);
+            if (!Directory.Exists(target)) throw new DirectoryNotFoundException("This folder is unavailable: " + target);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true });
+        }
         catch (Exception ex) { LibraryMessage.Text = ex.Message; }
     }
     private async void Import_Click(object sender, Wpf.RoutedEventArgs e)
