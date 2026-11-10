@@ -36,7 +36,7 @@ The **Settings** tab at the bottom of the sidebar saves changes immediately. **S
 
 **Overlay** shows a small status badge at the bottom right of the selected capture display: a green check while recording and a red X while inactive, including pause and recovery. It is enabled by default, accepts no mouse input, does not activate or take keyboard focus, and is excluded from Windows capture on supported Windows versions. It is a normal Windows desktop overlay with no game injection, graphics hooks or drivers. Desktop and borderless applications are supported; exclusive fullscreen and other overlays may cover it. No universal anti-cheat compatibility is claimed; individual games still require testing.
 
-The overlay is an icon-only 22 × 22 badge with a 12-point check or X, positioned just above the taskbar clock area. ClipIt plays a short chime immediately when it accepts a capture request, while the clip processes in the background. After the clip finishes saving successfully, the enabled badge flashes green. Successful captures do not send a Windows notification. Unavailable or already-busy save requests do not play the chime; a later save failure still displays an error.
+The overlay is an icon-only 22 × 22 badge with a 12-point check or X, positioned just above the taskbar clock area. ClipIt plays a short chime immediately when it accepts a capture request, while the clip processes in the background. After the clip finishes saving successfully, the enabled badge flashes green. Replay buffer messages, recovery warnings, and save errors appear in ClipIt. Unavailable or already-busy save requests do not play the chime.
 
 ## Game, Discord and microphone audio
 

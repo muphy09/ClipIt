@@ -35,7 +35,7 @@
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="156"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
               <Border Width="156" Height="88" CornerRadius="6" Background="#07101D" ClipToBounds="True"><Grid><TextBlock Text="▶" FontSize="22" Foreground="#42618D" HorizontalAlignment="Center" VerticalAlignment="Center"/><Image Source="{Binding Thumbnail}" Stretch="UniformToFill" Loaded="Thumbnail_Loaded"/></Grid></Border>
-              <StackPanel Grid.Column="1" Margin="18,0,12,0" VerticalAlignment="Center"><TextBlock Text="{Binding Title}" Foreground="#EFF4FC" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}"/><TextBlock Text="{Binding Detail}" Foreground="#93A9C8" FontSize="12" Margin="0,8,0,0"/><TextBlock Text="{Binding Date}" Foreground="#627D9F" FontSize="11" Margin="0,6,0,0"/></StackPanel>
+              <StackPanel Grid.Column="1" Margin="18,0,12,0" VerticalAlignment="Center"><TextBlock Text="{Binding Title}" Foreground="#EFF4FC" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}"/><TextBlock Text="{Binding Detail}" Foreground="#93A9C8" FontSize="12" Margin="0,8,0,0"/><TextBlock Text="{Binding Date}" Foreground="#627D9F" FontSize="11" Margin="0,6,0,0"/></StackPanel>
               <TextBlock Grid.Column="2" Text="›" FontSize="26" Foreground="#5E8CC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
             </Grid>
           </DataTemplate></ListBox.ItemTemplate>

@@ -19,12 +19,13 @@
           <TextBlock x:Name="PlayerPlaceholder" Text="Loading your clip…" Foreground="#839DBE" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
           <Border x:Name="PlaybackOverlay" Background="#E6142032" VerticalAlignment="Bottom" Padding="14,10" Margin="8" CornerRadius="8" Opacity="0">
             <StackPanel>
-              <Slider x:Name="SeekSlider" Minimum="0" Maximum="1" IsMoveToPointEnabled="False" ValueChanged="Seek_Changed" PreviewMouseLeftButtonDown="Seek_Down" PreviewMouseMove="Seek_Move" PreviewMouseLeftButtonUp="Seek_Up" LostMouseCapture="Seek_LostCapture" AutomationProperties.Name="Playback position"/>
-              <Grid Margin="0,5,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <local:TrimRange x:Name="Range" RangeChanged="Range_Changed" SeekRequested="Range_Seek" ScrubStarted="Range_ScrubStarted" ScrubEnded="Range_ScrubEnded" AutomationProperties.Name="Playback and trim timeline"/>
+              <Grid Margin="0,5,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <Button x:Name="PlayButton" Content="Play" Width="62" Click="Play_Click" Padding="8,7"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0"><TextBlock x:Name="PositionLabel" Text="00:00.00" FontFamily="Consolas" Foreground="#B6D4FF"/><TextBlock Text=" / " Foreground="#617C9E"/><TextBlock x:Name="DurationLabel" Text="00:00.00" Foreground="#93A9C8" FontFamily="Consolas"/></StackPanel>
                 <Slider x:Name="VolumeSlider" Grid.Column="2" Width="75" Minimum="0" Maximum="1" Value="0.75" ValueChanged="Volume_Changed" AutomationProperties.Name="Preview master volume" ToolTip="Preview master volume" Margin="10,0"/>
-                <Button x:Name="FullscreenButton" Grid.Column="3" Content="&#xE740;" FontFamily="Segoe Fluent Icons" Click="Fullscreen_Click" AutomationProperties.Name="Fullscreen" ToolTip="Fullscreen · Esc to return" Padding="10,7"/>
+                <Button x:Name="TrimButton" Grid.Column="3" Content="Save trim" Visibility="Collapsed" Style="{StaticResource Primary}" Click="Trim_Click" Margin="0,0,8,0" Padding="10,7" ToolTip="Save the selected range and playback mix."/>
+                <Button x:Name="FullscreenButton" Grid.Column="4" Content="&#xE740;" FontFamily="Segoe Fluent Icons" Click="Fullscreen_Click" AutomationProperties.Name="Fullscreen" ToolTip="Fullscreen · Esc to return" Padding="10,7"/>
               </Grid>
             </StackPanel>
           </Border>
@@ -33,10 +34,6 @@
     </Grid>
     <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,14,0,0" Padding="18">
       <StackPanel>
-        <Grid><TextBlock Text="Keep the good part" FontSize="15" FontWeight="SemiBold"/><TextBlock x:Name="SelectionLabel" Foreground="#83B2F9" FontSize="12" HorizontalAlignment="Right"/></Grid>
-        <local:TrimRange x:Name="Range" RangeChanged="Range_Changed" SeekRequested="Range_Seek"/>
-        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="RangeLabel" Foreground="#829EBE" FontSize="11" VerticalAlignment="Center"/><StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" Visibility="Collapsed" Margin="0,0,8,0"/><Button x:Name="TrimButton" Content="Save trim" Style="{StaticResource Primary}" Click="Trim_Click" ToolTip="Save the selected range and playback mix while retaining separate source tracks."/></StackPanel></Grid>
-        <Border Background="#26374D" Height="1" Margin="0,14,0,14"/>
         <Grid Margin="0,0,0,12"><TextBlock Text="Audio mixer" FontSize="14" FontWeight="SemiBold"/><TextBlock x:Name="MixerHint" Text="Separate sources · saved with your trim" Foreground="#7999C0" FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -45,7 +42,13 @@
           <StackPanel x:Name="MicrophoneMixer" Grid.Column="4"><Grid><TextBlock Text="Microphone" FontSize="12"/><CheckBox x:Name="MicrophoneEnabled" IsChecked="True" HorizontalAlignment="Right" Width="44" Checked="Mix_Changed" Unchecked="Mix_Changed" AutomationProperties.Name="Microphone audio enabled" ToolTip="Microphone audio enabled"/></Grid><Slider x:Name="MicrophoneVolume" Minimum="0" Maximum="1" Value="1" ValueChanged="MixVolume_Changed" AutomationProperties.Name="Microphone volume" Margin="0,5,0,0"/></StackPanel>
         </Grid>
         <TextBlock Text="Turn a source off to mute it; sliders set its level. Separate source tracks stay editable." Foreground="#718BAA" FontSize="10" Margin="0,5,0,0"/>
-        <TextBlock x:Name="EditorMessage" Text="Drag the blue handles to trim." Foreground="#A1B8D6" FontSize="11" Margin="0,12,0,8" TextWrapping="Wrap"/>
+        <DockPanel Margin="0,12,0,8">
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+            <Button x:Name="SaveMixButton" Content="Save mix" Visibility="Collapsed" Click="Trim_Click" Padding="8,5" Margin="8,0,0,0"/>
+            <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" Visibility="Collapsed" Margin="8,0,0,0"/>
+          </StackPanel>
+          <TextBlock x:Name="EditorMessage" Text="Drag the blue handles to trim." Foreground="#A1B8D6" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap"/>
+        </DockPanel>
         <Grid x:Name="RenderProgress" Visibility="Collapsed" Margin="0,0,0,10"><ProgressBar Height="5" IsIndeterminate="True" Foreground="#4D8DFF" Background="#22344C" BorderThickness="0"/></Grid>
       </StackPanel>
     </Border>

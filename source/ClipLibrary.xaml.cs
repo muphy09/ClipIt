@@ -22,6 +22,8 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private ClipItem? mouseClip;
     private bool dragged, disposed;
     private string? selectedGame;
+    private ClipItem? menuClip;
+    private readonly HashSet<string> deleting = new(StringComparer.OrdinalIgnoreCase);
     public bool Busy => Editor.Busy;
     private readonly Dictionary<string, ClipItem> items = new(StringComparer.OrdinalIgnoreCase);
     public ClipLibrary()
@@ -64,12 +66,12 @@ public partial class ClipLibrary : C.UserControl, IDisposable
             foreach (var f in files)
             {
                 var stamp = new ClipStamp(f.Length, f.LastWriteTimeUtc);
-                if (!items.TryGetValue(f.FullName, out var item) || item.Stamp != stamp) item = new ClipItem(f.FullName, stamp, ClipFiles.Application(f.FullName, directory));
+                if (!items.TryGetValue(f.FullName, out var item) || item.Stamp != stamp || item.Path != f.FullName)
+                    item = new ClipItem(f.FullName, stamp, ClipFiles.DisplayApplication(ClipFiles.Application(f.FullName, directory)));
                 next.Add(item);
             }
             items.Clear();
             foreach (var item in next) items[item.Path] = item;
-            SummaryLabel.Text = $"{files.Length} {(files.Length == 1 ? "clip" : "clips")}  ·  {files.Sum(f => f.Length) / 1048576.0:0.#} MB  ·  Newest first";
             UpdateView();
         }
         catch (OperationCanceledException) { }
@@ -78,6 +80,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private void UpdateView()
     {
         if (GamesList == null) return; // Checked can fire while XAML is still loading.
+        SummaryLabel.Text = $"{items.Count} {(items.Count == 1 ? "clip" : "clips")}  ·  {items.Values.Sum(c => c.Stamp.Size) / 1048576.0:0.#} MB  ·  Newest first";
         bool byGame = ByGameTab.IsChecked == true;
         var ordered = items.Values.OrderByDescending(c => c.Stamp.Modified).ThenBy(c => c.Path, StringComparer.OrdinalIgnoreCase).ToArray();
         var games = ordered.GroupBy(c => c.Application, StringComparer.OrdinalIgnoreCase)
@@ -110,15 +113,21 @@ public partial class ClipLibrary : C.UserControl, IDisposable
 
     private void Clip_RightClick(object sender, MouseButtonEventArgs e)
     {
-        ClipsList.SelectedItem = ItemAt(e.OriginalSource); mouseClip = null;
+        menuClip = ItemAt(e.OriginalSource);
+        ClipsList.SelectedItem = menuClip;
+        mouseClip = null;
     }
     private void ClipMenu_Opened(object sender, Wpf.RoutedEventArgs e)
     {
-        if (sender is C.ContextMenu menu && (ClipsList.SelectedItem is not ClipItem || Editor.Busy)) menu.IsOpen = false;
+        if (sender is not C.ContextMenu menu) return;
+        menu.Tag = menuClip ?? ClipsList.SelectedItem;
+        menuClip = null;
+        if (menu.Tag is not ClipItem item || deleting.Contains(item.Path) || Editor.Busy) menu.IsOpen = false;
     }
+    private ClipItem? MenuClip => ClipsList.ContextMenu.Tag as ClipItem;
     private void Copy_Click(object sender, Wpf.RoutedEventArgs e)
     {
-        if (ClipsList.SelectedItem is not ClipItem item) return;
+        if (MenuClip is not ClipItem item) return;
         try
         {
             if (!File.Exists(item.Path)) throw new IOException("This clip is no longer available.");
@@ -129,36 +138,56 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     }
     private async void Delete_Click(object sender, Wpf.RoutedEventArgs e)
     {
-        if (ClipsList.SelectedItem is not ClipItem item || Editor.Busy) return;
+        if (MenuClip is not ClipItem item || Editor.Busy || !deleting.Add(item.Path)) return;
         try
         {
+            if (item.PreviewTask is { IsCompleted: false } preview)
+            {
+                item.PreviewCancellation?.Cancel();
+                await preview;
+            }
             // Recycle rather than permanently deleting so accidental clicks are recoverable.
-            await Task.Run(() => Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(item.Path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin));
+            await Task.Run(() =>
+            {
+                if (File.Exists(item.Path))
+                    Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(item.Path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                if (File.Exists(item.Path)) throw new IOException("The file is still in the clip folder.");
+                ClipFiles.RemoveTitle(item.Path);
+            });
+            if (disposed) return;
+            ++generation; // Ignore any directory snapshot taken before the file was removed.
+            items.Remove(item.Path);
+            UpdateView();
             LibraryMessage.Text = "Clip moved to the Recycle Bin.";
-            await Reload();
         }
         catch (Exception ex) { LibraryMessage.Text = "Could not delete clip: " + ex.Message; }
+        finally { deleting.Remove(item.Path); Refresh(); }
     }
-    private async void Thumbnail_Loaded(object sender, Wpf.RoutedEventArgs e)
+    private void Thumbnail_Loaded(object sender, Wpf.RoutedEventArgs e)
     {
-        if (sender is not C.Image { DataContext: ClipItem item } || item.Loading || item.Read) return;
-        item.Loading = true;
+        if (sender is not C.Image { DataContext: ClipItem item } || item.PreviewTask is { IsCompleted: false } || item.Read || deleting.Contains(item.Path)) return;
+        item.PreviewTask = LoadThumbnail(item);
+    }
+    private async Task LoadThumbnail(ClipItem item)
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        item.PreviewCancellation = cancellation;
         try
         {
-            var info = await MediaTools.Probe(item.Path, lifetime.Token);
-            string thumbnail = await MediaTools.Thumbnail(item.Path, item.Stamp, lifetime.Token);
+            var info = await MediaTools.Probe(item.Path, cancellation.Token);
+            string thumbnail = await MediaTools.Thumbnail(item.Path, item.Stamp, cancellation.Token);
             var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.DecodePixelWidth = 320; image.UriSource = new Uri(thumbnail); image.EndInit(); image.Freeze();
             item.SetInfo(info, image);
         }
         catch (OperationCanceledException) { }
         catch { item.SetDetail("Preview unavailable · click to retry playback"); }
-        finally { item.Loading = false; }
+        finally { item.PreviewCancellation = null; }
     }
     public async Task OpenClip(string path)
     {
-        if (Editor.Busy) return;
+        if (Editor.Busy || deleting.Contains(path)) return;
         Dashboard.Visibility = Wpf.Visibility.Collapsed; Editor.Visibility = Wpf.Visibility.Visible;
-        await Editor.Open(path);
+        await Editor.Open(path, ClipFiles.DisplayApplication(ClipFiles.Application(path, folder)));
     }
     public void ShowDashboard()
     {
@@ -249,13 +278,20 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         public string Path { get; }
         public ClipStamp Stamp { get; }
         public string Application { get; }
-        public string Title => System.IO.Path.GetFileNameWithoutExtension(Path);
-        public string Date => Application + "  ·  " + Stamp.Modified.ToLocalTime().ToString("MMM d, yyyy  ·  h:mm tt");
+        public string Title { get; }
+        public string Date => Stamp.Modified.ToLocalTime().ToString("MMM d, yyyy  ·  h:mm tt");
         public string Detail { get; private set; }
         public BitmapImage? Thumbnail { get; private set; }
-        public bool Loading, Read;
+        public Task? PreviewTask;
+        public CancellationTokenSource? PreviewCancellation;
+        public bool Read;
         public event PropertyChangedEventHandler? PropertyChanged;
-        public ClipItem(string path, ClipStamp stamp, string application) { Path = path; Stamp = stamp; Application = application; Detail = $"{stamp.Size / 1048576.0:0.#} MB  ·  Loading preview…"; }
+        public ClipItem(string path, ClipStamp stamp, string application)
+        {
+            Path = path; Stamp = stamp; Application = application;
+            Title = ClipFiles.Title(path, application);
+            Detail = $"{stamp.Size / 1048576.0:0.#} MB  ·  Loading preview…";
+        }
         public void SetInfo(ClipInfo info, BitmapImage image) { Read = true; Thumbnail = image; Detail = $"{MediaTools.Time(info.Duration)}  ·  {info.Width} × {info.Height}  ·  {info.Size / 1048576.0:0.#} MB"; PropertyChanged?.Invoke(this, new(nameof(Thumbnail))); PropertyChanged?.Invoke(this, new(nameof(Detail))); }
         public void SetDetail(string text) { Detail = text; PropertyChanged?.Invoke(this, new(nameof(Detail))); }
     }

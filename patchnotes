@@ -1,10 +1,22 @@
+## [v0.5.9]
+
+### What's New
+
+- Trim timeline and Preview timeline are now one Timeline
+- Cleaned up game name organization
+    - Editing a name still changes the true file name
+- Check for Updates added
+- Removed Windows notifications, favoring in-app notifications
+
+### Bug Fixes
+
+- Deleting a clip now works every time
 ## [v0.5.8]
 
 ### What's New
 
 - Sound feedback now plays instantly after hotkey is pressed
     - Still takes 1-2 seconds to save the cache
------
 ## [v0.5.7]
 
 ### What's New

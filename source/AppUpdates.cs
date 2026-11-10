@@ -12,9 +12,10 @@ internal sealed class AppUpdates : IDisposable
     private readonly UpdateManager manager = CreateManager();
     private readonly CancellationTokenSource lifetime = new();
     private bool checking;
-    internal string Text { get; private set; } = "Checking for updates…";
+    internal string Text { get; private set; } = "Checking for Updates…";
     internal bool CanApply { get; private set; }
     internal bool CanRetry { get; private set; }
+    internal bool CanCheck { get; private set; }
     internal event Action? Changed;
 
     private static UpdateManager CreateManager()
@@ -46,10 +47,10 @@ internal sealed class AppUpdates : IDisposable
         {
             if (!manager.IsInstalled) { Set("Development build", retry: false); return; }
             if (manager.UpdatePendingRestart != null) { Set("Apply Update", apply: true); return; }
-            Set("Checking for updates…");
+            Set("Checking for Updates…");
             var update = await manager.CheckForUpdatesAsync();
             if (lifetime.IsCancellationRequested) return;
-            if (update == null) { Set("Up to date!"); return; }
+            if (update == null) { Set("Up to Date!", check: true); return; }
             Set("Update found: Downloading");
             await manager.DownloadUpdatesAsync(update, percent => Set($"Update found: Downloading {Math.Clamp(percent, 0, 100)}%"), lifetime.Token);
             if (!lifetime.IsCancellationRequested) Set("Apply Update", apply: true);
@@ -67,9 +68,9 @@ internal sealed class AppUpdates : IDisposable
         Set("Applying update…");
     }
 
-    private void Set(string text, bool apply = false, bool retry = false)
+    private void Set(string text, bool apply = false, bool retry = false, bool check = false)
     {
-        Text = text; CanApply = apply; CanRetry = retry;
+        Text = text; CanApply = apply; CanRetry = retry; CanCheck = check;
         Log.Write("Update: " + text);
         if (Environment.GetEnvironmentVariable("CLIPIT_DATA") is { Length: > 0 })
             try { Directory.CreateDirectory(Settings.DataDirectory); File.WriteAllText(Path.Combine(Settings.DataDirectory, "update-status.json"), JsonSerializer.Serialize(new { Version, Text, CanApply, CanRetry })); } catch { }

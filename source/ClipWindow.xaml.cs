@@ -30,7 +30,6 @@ public partial class ClipWindow : Wpf.Window
     private bool registered, quitting, restartRequested, dirty, populating = true;
     private bool capturingShortcut;
     private string lastPath = "";
-    private DateTime lastRecoveryNotice;
     private ClipLibrary? library;
     private PatchNotesWindow? patchNotes;
     private readonly AppUpdates updates = new();
@@ -131,10 +130,6 @@ public partial class ClipWindow : Wpf.Window
         var appIcon = new System.Drawing.Icon(iconStream);
         tray = new Forms.NotifyIcon { Text = "ClipIt · starting", Icon = appIcon, Visible = true, ContextMenuStrip = menu };
         tray.DoubleClick += (_, _) => ShowSettings();
-        tray.BalloonTipClicked += (_, _) =>
-        {
-            if (File.Exists(lastPath)) { ShowLibrary(); _ = library!.OpenClip(lastPath); }
-        };
         recorder.Message += OnRecorderMessage;
         timer.Tick += (_, _) => Tick();
         SourceInitialized += (_, _) =>
@@ -256,15 +251,9 @@ public partial class ClipWindow : Wpf.Window
                 break;
             case "error": case "notice":
                 Notice(message.Text, message.Type == "error");
-                tray.ShowBalloonTip(4500, "ClipIt", message.Text, Forms.ToolTipIcon.Warning);
                 break;
             case "recovering":
                 Notice(message.Text + " The replay buffer will refill after recovery.", true);
-                if (DateTime.UtcNow - lastRecoveryNotice > TimeSpan.FromMinutes(1))
-                {
-                    lastRecoveryNotice = DateTime.UtcNow;
-                    tray.ShowBalloonTip(5000, "ClipIt · Restoring capture", "Recording is restarting automatically. Your buffer will refill.", Forms.ToolTipIcon.Warning);
-                }
                 break;
         }
     }
@@ -548,8 +537,10 @@ public partial class ClipWindow : Wpf.Window
         UpdateButton.Visibility = clickable ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
         UpdateLabel.Visibility = clickable ? Wpf.Visibility.Collapsed : Wpf.Visibility.Visible;
         UpdateLabel.Text = "- " + updates.Text;
+        CheckUpdateButton.Visibility = updates.CanCheck ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
         UpdateButton.Foreground = updates.CanApply ? Blue : updates.CanRetry ? Amber : Brush("#7890B0");
     }
+    private async void CheckUpdate_Click(object sender, Wpf.RoutedEventArgs e) => await updates.Check();
     private async void Update_Click(object sender, Wpf.RoutedEventArgs e)
     {
         if (updates.CanRetry) { await updates.Check(); return; }

@@ -61,7 +61,10 @@
               </Border>
               <WrapPanel Margin="8,3,0,0">
                 <TextBlock x:Name="VersionLabel" Foreground="#7890B0" FontSize="10" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                <TextBlock x:Name="UpdateLabel" Text="- Checking for updates…" Foreground="#7890B0" FontSize="10" MaxWidth="148" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock x:Name="UpdateLabel" Text="- Checking for Updates…" Foreground="#7890B0" FontSize="10" MaxWidth="148" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                  <Button x:Name="CheckUpdateButton" Content="Check" Visibility="Collapsed" Style="{StaticResource Quiet}" Foreground="#9CC7FF" FontSize="10" Padding="5,3" Click="CheckUpdate_Click" AutomationProperties.Name="Check for updates"/>
+                </StackPanel>
                 <Button x:Name="UpdateButton" Visibility="Collapsed" Content="- Apply Update" Style="{StaticResource Quiet}" FontSize="10" Padding="4,6" HorizontalAlignment="Left" Click="Update_Click" AutomationProperties.Name="Update status" ToolTip="Updates download in the background and apply on demand or after a full quit and relaunch."/>
               </WrapPanel>
             </StackPanel>

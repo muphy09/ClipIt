@@ -19,23 +19,27 @@ public sealed class TrimRange : C.Canvas
     public double End { get; private set; }
     public event EventHandler? RangeChanged;
     public event EventHandler<double>? SeekRequested;
+    public event EventHandler? ScrubStarted;
+    public event EventHandler? ScrubEnded;
+    public bool IsAdjusting => scrubbing || left.IsDragging || right.IsDragging;
     private double position;
     private bool scrubbing;
     public TrimRange()
     {
-        Height = 58; Background = M.Brushes.Transparent;
+        Height = 58; Background = M.Brushes.Transparent; Focusable = true;
         Children.Add(rail); Children.Add(selection); Children.Add(playhead); Children.Add(left); Children.Add(right);
         SizeChanged += (_, _) => Layout();
-        left.DragDelta += (_, e) => SetRange(Math.Clamp(Start + Delta(e.HorizontalChange), 0, End - .1), End);
-        right.DragDelta += (_, e) => SetRange(Start, Math.Clamp(End + Delta(e.HorizontalChange), Start + .1, Duration));
+        left.DragDelta += (_, e) => MoveHandle(true, Delta(e.HorizontalChange));
+        right.DragDelta += (_, e) => MoveHandle(false, Delta(e.HorizontalChange));
         left.KeyDown += (_, e) => MoveKey(e, true); right.KeyDown += (_, e) => MoveKey(e, false);
         MouseLeftButtonDown += (_, e) =>
         {
             if (Duration <= 0) return;
             double x = e.GetPosition(this).X;
-            if (Math.Abs(x - X(Start)) < 10 || Math.Abs(x - X(End)) < 10) return;
+            Focus();
             if (!CaptureMouse()) return;
             scrubbing = true;
+            ScrubStarted?.Invoke(this, EventArgs.Empty);
             SeekAt(x);
             e.Handled = true;
         };
@@ -50,21 +54,33 @@ public sealed class TrimRange : C.Canvas
             if (!scrubbing) return;
             SeekAt(e.GetPosition(this).X); EndScrub(); e.Handled = true;
         };
-        LostMouseCapture += (_, _) => scrubbing = false;
+        LostMouseCapture += (_, _) => EndScrub();
+        KeyDown += (_, e) =>
+        {
+            if (Duration <= 0 || e.Key is not (Key.Left or Key.Right)) return;
+            double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 1 : .05;
+            SeekRequested?.Invoke(this, Math.Clamp(position + (e.Key == Key.Left ? -step : step), 0, Duration));
+            e.Handled = true;
+        };
     }
     private void SeekAt(double x)
     {
         double next = Math.Clamp((x - 8) / Math.Max(1, ActualWidth - 16) * Duration, 0, Duration);
         SetPosition(next); SeekRequested?.Invoke(this, next);
     }
-    private void EndScrub() { scrubbing = false; if (IsMouseCaptured) ReleaseMouseCapture(); }
-    public void Setup(double duration) { Duration = duration; Start = 0; End = duration; Layout(); }
+    public void EndScrub()
+    {
+        if (!scrubbing) return;
+        scrubbing = false;
+        if (IsMouseCaptured) ReleaseMouseCapture();
+        ScrubEnded?.Invoke(this, EventArgs.Empty);
+    }
+    public void Setup(double duration) { Duration = duration; Start = position = 0; End = duration; Layout(); }
     public void SetRange(double start, double end)
     {
         if (Duration < .1) return;
         Start = Math.Clamp(start, 0, Math.Max(0, Duration - .1));
-        End = Math.Clamp(end, Start + .1, Duration);
-        if (Start > End - .1) Start = End - .1;
+        End = Math.Clamp(end, Math.Min(Start + .1, Duration), Duration);
         Layout(); RangeChanged?.Invoke(this, EventArgs.Empty);
     }
     public void SetPosition(double value) { position = value; Layout(); }
@@ -83,8 +99,14 @@ public sealed class TrimRange : C.Canvas
         double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 1 : .05;
         if (e.Key is not (Key.Left or Key.Right)) return;
         if (e.Key == Key.Left) step = -step;
-        if (start) SetRange(Math.Clamp(Start + step, 0, End - .1), End); else SetRange(Start, End + step);
+        MoveHandle(start, step);
         e.Handled = true;
+    }
+    private void MoveHandle(bool start, double step)
+    {
+        if (Duration < .1) return;
+        if (start) SetRange(Math.Min(Start + step, End - .1), End);
+        else SetRange(Start, End + step);
     }
     private static Thumb Handle(string name)
     {

@@ -67,6 +67,9 @@ internal static class DesktopChecks
                 var noteBlocks = formatted.Blocks.ToArray();
                 Require(noteBlocks.Length == 5 && noteBlocks[0] is System.Windows.Documents.Paragraph version && new System.Windows.Documents.TextRange(version.ContentStart, version.ContentEnd).Text.Trim() == "[v0.5.7]" && version.FontSize > ((System.Windows.Documents.Paragraph)noteBlocks[1]).FontSize, "Patch notes render version and section headings at distinct sizes");
                 Require(noteBlocks[2] is System.Windows.Documents.List noteList && noteList.ListItems.Count == 2 && new System.Windows.Documents.TextRange(noteList.ContentStart, noteList.ContentEnd).Text.Contains("Another fix continued"), "Patch notes render bullets, wrapped items and multiple versions");
+                var nestedNotes = (System.Windows.Documents.List)PatchNotesWindow.FormatNotes("- Parent\n    - Child\n\t\t- Grandchild\n\t- Sibling\n- Next parent").Blocks.FirstBlock;
+                var children = (System.Windows.Documents.List)nestedNotes.ListItems.FirstListItem.Blocks.LastBlock;
+                Require(nestedNotes.ListItems.Count == 2 && children.ListItems.Count == 2 && children.ListItems.FirstListItem.Blocks.LastBlock is System.Windows.Documents.List, "Patch notes preserve nested bullets indented with spaces or tabs");
                 Require(PatchNotesWindow.FormatNotes("  \n").Blocks.Count == 1 && File.Exists(Path.Combine(AppContext.BaseDirectory, "patchnotes")), "Empty patch notes show a message and the editable notes file is bundled");
                 var patchButton = (C.Button)window.FindName("PatchNotesButton");
                 patchButton.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
@@ -169,6 +172,18 @@ internal static class DesktopChecks
                 overlayToggle.IsChecked = true;
                 Require(Settings.Load().Overlay, "Overlay can be re-enabled and persisted");
                 using var editor = new ClipEditor();
+                var range = (TrimRange)editor.FindName("Range");
+                var trimButton = (C.Button)editor.FindName("TrimButton");
+                Require(editor.FindName("SeekSlider") == null && ((C.Panel)range.Parent).Parent == editor.FindName("PlaybackOverlay")
+                    && C.Grid.GetColumn((Wpf.UIElement)editor.FindName("VolumeSlider")) < C.Grid.GetColumn(trimButton)
+                    && C.Grid.GetColumn(trimButton) < C.Grid.GetColumn((Wpf.UIElement)editor.FindName("FullscreenButton")), "One timeline and Save trim live inside the preview controls");
+                typeof(ClipEditor).GetField("info", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(editor, new ClipInfo(10, 320, 180, 0, 0));
+                range.Setup(10);
+                Require(trimButton.Visibility == Wpf.Visibility.Collapsed, "Full-length selection hides Save trim");
+                range.SetRange(1, 10);
+                Require(trimButton.Visibility == Wpf.Visibility.Visible, "Moving a trim handle shows Save trim");
+                range.SetRange(0, 10);
+                Require(trimButton.Visibility == Wpf.Visibility.Collapsed, "Restoring the full range hides Save trim again");
                 var game = (C.CheckBox)editor.FindName("GameEnabled");
                 var discord = (C.CheckBox)editor.FindName("DiscordEnabled");
                 var mic = (C.CheckBox)editor.FindName("MicrophoneEnabled");
@@ -179,6 +194,46 @@ internal static class DesktopChecks
                 Require(mix.DiscordMuted && mix.DiscordGain == 0 && mix.GameGain == 1 && mix.MicrophoneGain == 1, "Turning off Discord mutes only that source");
                 discord.IsChecked = true;
                 Require(((MixSettings)currentMix.Invoke(editor, null)!).DiscordGain == 1, "Turning audio back on restores the source");
+
+                using (var testLibrary = new ClipLibrary())
+                {
+                    string libraryRoot = Path.Combine(data, "library-check");
+                    string gameFolder = Path.Combine(libraryRoot, "rocketleague");
+                    Directory.CreateDirectory(gameFolder);
+                    string target = Path.Combine(gameFolder, "original-filename.mp4");
+                    File.WriteAllText(target, "disposable library fixture");
+                    testLibrary.SetFolder(libraryRoot);
+                    var list = (C.ListBox)testLibrary.FindName("ClipsList");
+                    for (int i = 0; i < 40 && list.Items.Count == 0; i++) await Task.Delay(50);
+                    Require(list.Items.Count == 1 && (string?)list.Items[0].GetType().GetProperty("Application")?.GetValue(list.Items[0]) == "Rocket League", "Existing rocketleague folders display as Rocket League");
+                    await testLibrary.OpenClip(target);
+                    var clipEditor = (ClipEditor)testLibrary.FindName("Editor");
+                    var title = (C.TextBlock)clipEditor.FindName("ClipTitle");
+                    Require(title.Text == "Rocket League", "An unrenamed clip shows the game title in the editor");
+                    ((C.Button)clipEditor.FindName("RenameButton")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                    var nameEdit = (C.TextBox)clipEditor.FindName("NameEdit");
+                    Require(nameEdit.Text == "original-filename", "The pencil opens the actual filename for editing");
+                    string renamed = Path.Combine(gameFolder, "Overtime goal.mp4");
+                    nameEdit.Text = "Overtime goal";
+                    nameEdit.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
+                        Wpf.PresentationSource.FromVisual(window), 0, System.Windows.Input.Key.Enter)
+                    { RoutedEvent = System.Windows.Input.Keyboard.KeyDownEvent });
+                    for (int i = 0; i < 40 && title.Text != "Overtime goal"; i++) await Task.Delay(50);
+                    Require(!File.Exists(target) && File.Exists(renamed) && title.Text == "Overtime goal", "Saving a pencil edit renames the file and replaces the game title in the editor");
+                    await testLibrary.OpenClip(renamed);
+                    Require(title.Text == "Overtime goal", "Reopening a clip keeps its custom title");
+                    testLibrary.ShowDashboard();
+                    string? ListTitle() => list.Items.Count == 1 ? (string?)list.Items[0].GetType().GetProperty("Title")?.GetValue(list.Items[0]) : null;
+                    for (int i = 0; i < 40 && ListTitle() != "Overtime goal"; i++) await Task.Delay(50);
+                    Require(ListTitle() == "Overtime goal", "Your Clips shows the persisted custom title after refreshing");
+                    list.SelectedIndex = 0;
+                    list.ContextMenu.RaiseEvent(new Wpf.RoutedEventArgs(C.ContextMenu.OpenedEvent));
+                    testLibrary.Refresh();
+                    for (int i = 0; i < 40 && list.SelectedItem != null; i++) await Task.Delay(50);
+                    ((C.MenuItem)list.ContextMenu.Items[1]).RaiseEvent(new Wpf.RoutedEventArgs(C.MenuItem.ClickEvent));
+                    for (int i = 0; i < 40 && (File.Exists(renamed) || list.Items.Count != 0); i++) await Task.Delay(50);
+                    Require(!File.Exists(renamed) && list.Items.Count == 0, "One Delete removes the selected clip after a library refresh clears the selection");
+                }
 
                 var overlay = new RecordingOverlay();
                 try

@@ -31,7 +31,7 @@ public partial class PatchNotesWindow : Window
             Foreground = new SolidColorBrush(Color.FromRgb(0xCE, 0xDA, 0xEB)),
             PagePadding = new Thickness(26, 18, 26, 24)
         };
-        System.Windows.Documents.List? bullets = null;
+        var lists = new Stack<(int Indent, System.Windows.Documents.List Bullets)>();
         Paragraph? paragraph = null;
         foreach (string raw in notes.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
         {
@@ -40,7 +40,7 @@ public partial class PatchNotesWindow : Window
             int level = line.TakeWhile(c => c == '#').Count();
             if (level is >= 1 and <= 6 && line.Length > level && line[level] == ' ')
             {
-                bullets = null;
+                lists.Clear();
                 paragraph = null;
                 var heading = new Paragraph(new Run(line[(level + 1)..].Trim()))
                 {
@@ -54,13 +54,24 @@ public partial class PatchNotesWindow : Window
             }
             else if (line.StartsWith("- ") || line.StartsWith("* ") || line.StartsWith("+ "))
             {
-                if (bullets == null)
+                int indent = 0;
+                foreach (char c in raw.AsSpan(0, raw.Length - raw.TrimStart().Length))
+                    indent += c == '\t' ? 4 - indent % 4 : 1;
+                while (lists.TryPeek(out var parent) && parent.Indent > indent) lists.Pop();
+                if (lists.Count == 0 || lists.Peek().Indent < indent)
                 {
-                    bullets = new System.Windows.Documents.List { MarkerStyle = TextMarkerStyle.Disc, Padding = new Thickness(20, 0, 0, 0), Margin = new Thickness(0, 0, 0, 10) };
-                    document.Blocks.Add(bullets);
+                    var bullets = new System.Windows.Documents.List
+                    {
+                        MarkerStyle = lists.Count == 0 ? TextMarkerStyle.Disc : TextMarkerStyle.Circle,
+                        Padding = new Thickness(20, 0, 0, 0),
+                        Margin = new Thickness(0, 0, 0, lists.Count == 0 ? 10 : 0)
+                    };
+                    if (lists.TryPeek(out var containingList)) containingList.Bullets.ListItems.LastListItem.Blocks.Add(bullets);
+                    else document.Blocks.Add(bullets);
+                    lists.Push((indent, bullets));
                 }
                 paragraph = new Paragraph(new Run(line[2..].Trim())) { Margin = new Thickness(0, 0, 0, 8), LineHeight = 21 };
-                bullets.ListItems.Add(new ListItem(paragraph));
+                lists.Peek().Bullets.ListItems.Add(new ListItem(paragraph));
             }
             else if (paragraph != null)
             {
@@ -68,7 +79,7 @@ public partial class PatchNotesWindow : Window
             }
             else
             {
-                bullets = null;
+                lists.Clear();
                 paragraph = new Paragraph(new Run(line)) { Margin = new Thickness(0, 0, 0, 10), LineHeight = 21 };
                 document.Blocks.Add(paragraph);
             }

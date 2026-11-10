@@ -12,9 +12,10 @@ namespace ClipIt;
 public partial class ClipEditor : C.UserControl, IDisposable
 {
     private string path = "";
+    private string gameName = "";
     private ClipInfo? info;
     private ClipStamp stamp;
-    private bool playing, opened, settingSeek, seeking, resumeAfterSeek, loadingMix;
+    private bool playing, opened, resumeAfterSeek, loadingMix;
     private int generation;
     private CancellationTokenSource? loading, rendering;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(80) };
@@ -45,22 +46,22 @@ public partial class ClipEditor : C.UserControl, IDisposable
             double p = Player.Position.TotalSeconds;
             if (playing && p >= Range.End - .025) { Pause(); Seek(Range.Start); p = Range.Start; }
             PositionLabel.Text = MediaTools.Time(p); Range.SetPosition(p);
-            if (!seeking) { settingSeek = true; SeekSlider.Value = Math.Clamp(p, 0, info.Duration); settingSeek = false; }
             if (playing && info.HasStems)
                 for (int i = 0; i < stems.Length; i++) if (stemReady[i] && Math.Abs(stems[i].Position.TotalSeconds - p) > .075) stems[i].Position = TimeSpan.FromSeconds(p);
         };
-        overlayTimer.Tick += (_, _) => { overlayTimer.Stop(); if (playing && !PlaybackOverlay.IsMouseOver && !seeking) HideOverlay(); };
+        overlayTimer.Tick += (_, _) => { overlayTimer.Stop(); if (playing && !PlaybackOverlay.IsMouseOver && !Range.IsAdjusting && !TrimChanged) HideOverlay(); };
         IsVisibleChanged += (_, _) => { if (!IsVisible) Suspend(); };
     }
 
-    public async Task Open(string file)
+    public async Task Open(string file, string application)
     {
         if (Busy) return;
         int current = ++generation;
         loading?.Cancel(); loading?.Dispose(); loading = new();
-        ClosePlayback(); info = null; path = file;
+        ClosePlayback(); info = null; path = file; gameName = application;
+        UpdateSaveActions();
         NameEdit.Visibility = Wpf.Visibility.Collapsed; NameDisplay.Visibility = Wpf.Visibility.Visible;
-        ClipTitle.Text = Path.GetFileNameWithoutExtension(file); ClipTitle.ToolTip = file;
+        ClipTitle.Text = ClipFiles.Title(file, gameName); ClipTitle.ToolTip = ClipTitle.Text;
         PlayerPlaceholder.Text = "Loading your clip…"; PlayerPlaceholder.Visibility = Wpf.Visibility.Visible;
         SetControls(false); EditorMessage.Text = "Reading clip…";
         try
@@ -68,10 +69,9 @@ public partial class ClipEditor : C.UserControl, IDisposable
             stamp = ClipStamp.Read(file);
             var read = await MediaTools.Probe(file, loading.Token);
             if (current != generation) return;
-            info = read; Range.Setup(read.Duration); UpdateRange(); lastStart = 0;
+            info = read; Range.Setup(read.Duration); lastStart = 0;
             ClipDetails.Text = $"{read.Width} × {read.Height}  ·  {MediaTools.Time(read.Duration)}  ·  {read.Size / 1048576.0:0.#} MB";
             DurationLabel.Text = MediaTools.Time(read.Duration);
-            settingSeek = true; SeekSlider.Maximum = read.Duration; SeekSlider.Value = 0; settingSeek = false;
             loadingMix = true;
             GameVolume.Value = Math.Clamp(read.Mix.Game, 0, 1); DiscordVolume.Value = Math.Clamp(read.Mix.Discord, 0, 1); MicrophoneVolume.Value = Math.Clamp(read.Mix.Microphone, 0, 1);
             GameEnabled.IsChecked = !read.Mix.GameMuted; DiscordEnabled.IsChecked = !read.Mix.DiscordMuted; MicrophoneEnabled.IsChecked = !read.Mix.MicrophoneMuted;
@@ -90,7 +90,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
                 for (int i = 0; i < 3; i++) { stems[i].Open(new Uri(preview.Files[i])); stems[i].Pause(); }
             }
             EditorMessage.Text = "Drag the blue handles to trim. Save trim also saves your playback mix.";
-            SetControls(true); ApplyVolumes(); timer.Start(); ShowOverlay();
+            SetControls(true); ApplyVolumes(); UpdateSaveActions(); timer.Start(); ShowOverlay();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (current == generation) { PlayerPlaceholder.Text = "This clip couldn't be prepared."; EditorMessage.Text = ex.Message; } }
@@ -104,8 +104,12 @@ public partial class ClipEditor : C.UserControl, IDisposable
         Player.Volume = info.HasStems ? 0 : mix.GameGain * master;
         stems[0].Volume = mix.GameGain * master; stems[1].Volume = mix.DiscordGain * master; stems[2].Volume = mix.MicrophoneGain * master;
     }
-    private void Mix_Changed(object sender, Wpf.RoutedEventArgs e) { if (!loadingMix) ApplyVolumes(); }
-    private void MixVolume_Changed(object sender, Wpf.RoutedPropertyChangedEventArgs<double> e) { if (!loadingMix) ApplyVolumes(); }
+    private void Mix_Changed(object sender, Wpf.RoutedEventArgs e)
+    {
+        if (loadingMix || info == null) return;
+        ApplyVolumes(); UpdateSaveActions();
+    }
+    private void MixVolume_Changed(object sender, Wpf.RoutedPropertyChangedEventArgs<double> e) => Mix_Changed(sender, e);
     private void Volume_Changed(object sender, Wpf.RoutedPropertyChangedEventArgs<double> e) => ApplyVolumes();
     private void Player_Opened(object sender, Wpf.RoutedEventArgs e)
     {
@@ -146,48 +150,31 @@ public partial class ClipEditor : C.UserControl, IDisposable
         for (int i = 0; i < 3; i++) if (stemReady[i]) stems[i].Position = Player.Position;
         Range.SetPosition(position); PositionLabel.Text = MediaTools.Time(position);
     }
-    private void Seek_Changed(object sender, Wpf.RoutedPropertyChangedEventArgs<double> e) { if (!settingSeek && opened && !Busy) Seek(e.NewValue); }
-    private void Seek_Down(object sender, MouseButtonEventArgs e)
+    private void Range_ScrubStarted(object? sender, EventArgs e)
     {
-        if (!opened || Busy || !SeekSlider.CaptureMouse()) return;
-        seeking = true; resumeAfterSeek = playing; Pause();
-        SeekToPointer(e); e.Handled = true;
+        if (!opened || Busy) return;
+        resumeAfterSeek = playing; Pause();
     }
-    private void Seek_Move(object sender, MouseEventArgs e)
+    private void Range_ScrubEnded(object? sender, EventArgs e)
     {
-        if (!seeking) return;
-        if (e.LeftButton != MouseButtonState.Pressed) { EndSeek(); return; }
-        SeekToPointer(e); ShowOverlay(); e.Handled = true;
-    }
-    private void Seek_Up(object sender, MouseButtonEventArgs e)
-    {
-        if (!seeking) return;
-        SeekToPointer(e); EndSeek(); e.Handled = true;
-    }
-    private void Seek_LostCapture(object sender, MouseEventArgs e) => EndSeek();
-    private void SeekToPointer(MouseEventArgs e)
-    {
-        if (SeekSlider.Template.FindName("PART_Track", SeekSlider) is not System.Windows.Controls.Primitives.Track track) return;
-        double halfThumb = (track.Thumb?.ActualWidth ?? 0) / 2;
-        double fraction = Math.Clamp((e.GetPosition(track).X - halfThumb) / Math.Max(1, track.ActualWidth - halfThumb * 2), 0, 1);
-        SeekSlider.Value = SeekSlider.Minimum + fraction * (SeekSlider.Maximum - SeekSlider.Minimum);
-    }
-    private void EndSeek()
-    {
-        if (!seeking) return;
-        seeking = false;
         bool resume = resumeAfterSeek; resumeAfterSeek = false;
-        if (SeekSlider.IsMouseCaptured) SeekSlider.ReleaseMouseCapture();
-        if (resume && opened && !Busy && IsVisible) StartPlayback();
+        if (resume && opened && !Busy && IsVisible && Player.Position.TotalSeconds >= Range.Start && Player.Position.TotalSeconds < Range.End)
+            StartPlayback();
     }
     private void Range_Changed(object? sender, EventArgs e)
     {
         if (info == null) return;
         if (opened && !Busy) { Pause(); Seek(Math.Abs(Range.Start - lastStart) > .0001 ? Range.Start : Math.Max(Range.Start, Range.End - 1.0 / 60)); }
-        lastStart = Range.Start; UpdateRange();
+        lastStart = Range.Start; UpdateSaveActions(); ShowOverlay();
     }
-    private void Range_Seek(object? sender, double position) { if (opened && !Busy) { Pause(); Seek(position); ShowOverlay(); } }
-    private void UpdateRange() { SelectionLabel.Text = "Selected  " + MediaTools.Time(Range.End - Range.Start); RangeLabel.Text = MediaTools.Time(Range.Start) + "  –  " + MediaTools.Time(Range.End); }
+    private void Range_Seek(object? sender, double position) { if (opened && !Busy) { Seek(position); ShowOverlay(); } }
+    private bool TrimChanged => info != null && (Range.Start > .0001 || Range.Duration - Range.End > .0001);
+    private void UpdateSaveActions()
+    {
+        TrimButton.Visibility = TrimChanged ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+        SaveMixButton.Visibility = !Busy && !TrimChanged && info != null && CurrentMix() != info.Mix
+            ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+    }
     private async void Trim_Click(object sender, Wpf.RoutedEventArgs e) { if (info != null && Range.End - Range.Start >= .1) await Render(); }
     private async Task Render()
     {
@@ -195,6 +182,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
         var mix = CurrentMix(); double start = Range.Start, end = Range.End;
         var cts = new CancellationTokenSource(); rendering = cts;
         ExitFullscreen(); ClosePlayback();
+        ShowOverlay(); UpdateSaveActions();
         SetControls(false); BackButton.IsEnabled = false; CancelButton.Visibility = RenderProgress.Visibility = Wpf.Visibility.Visible; TrimButton.Content = "Saving…";
         EditorMessage.Text = "Saving your trim and mix… The original stays intact until the replacement is ready.";
         bool success = false;
@@ -203,11 +191,11 @@ public partial class ClipEditor : C.UserControl, IDisposable
         catch (Exception ex) { EditorMessage.Text = ex.Message; Log.Write("Editor: " + ex); }
         finally { rendering = null; cts.Dispose(); BackButton.IsEnabled = true; CancelButton.Visibility = RenderProgress.Visibility = Wpf.Visibility.Collapsed; TrimButton.Content = "Save trim"; }
         string message = success ? "Trim and playback mix saved. Separate source tracks remain editable." : EditorMessage.Text;
-        await Open(path); EditorMessage.Text = message;
+        await Open(path, gameName); EditorMessage.Text = message;
     }
     private void SetControls(bool enabled)
     {
-        PlayButton.IsEnabled = SeekSlider.IsEnabled = Range.IsEnabled = TrimButton.IsEnabled = DragButton.IsEnabled = RenameButton.IsEnabled = FullscreenButton.IsEnabled = enabled;
+        PlayButton.IsEnabled = Range.IsEnabled = TrimButton.IsEnabled = SaveMixButton.IsEnabled = DragButton.IsEnabled = RenameButton.IsEnabled = FullscreenButton.IsEnabled = enabled;
         GameVolume.IsEnabled = GameEnabled.IsEnabled = enabled;
         DiscordMixer.IsEnabled = MicrophoneMixer.IsEnabled = enabled && info?.HasStems == true;
     }
@@ -232,19 +220,20 @@ public partial class ClipEditor : C.UserControl, IDisposable
         if (name.Length == 0 || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.EndsWith('.') || name.StartsWith(".clipit-", StringComparison.OrdinalIgnoreCase) || AppTargets.FolderName(name) != name)
         { EditorMessage.Text = "Enter a valid filename without slashes, reserved names or a trailing period."; return; }
         string next = Path.Combine(Path.GetDirectoryName(path)!, name + ".mp4");
-        if (string.Equals(next, path, StringComparison.OrdinalIgnoreCase)) { CancelRename(); return; }
+        if (string.Equals(next, path, StringComparison.Ordinal)) { CancelRename(); return; }
         try
         {
-            if (File.Exists(next)) throw new IOException("A clip with that name already exists.");
+            if (!string.Equals(next, path, StringComparison.OrdinalIgnoreCase) && File.Exists(next))
+                throw new IOException("A clip with that name already exists.");
             if (ClipStamp.Read(path) != stamp) throw new IOException("This clip changed. Reopen it before renaming.");
             var mix = CurrentMix(); double start = Range.Start, end = Range.End;
-            ClosePlayback(); File.Move(path, next, false); path = next; CancelRename(); FileChanged?.Invoke(this, next); await Open(next);
+            ClosePlayback(); ClipFiles.Rename(path, next); path = next; CancelRename(); FileChanged?.Invoke(this, next); await Open(next, gameName);
             loadingMix = true;
             GameVolume.Value = mix.Game; DiscordVolume.Value = mix.Discord; MicrophoneVolume.Value = mix.Microphone;
             GameEnabled.IsChecked = !mix.GameMuted; DiscordEnabled.IsChecked = !mix.DiscordMuted; MicrophoneEnabled.IsChecked = !mix.MicrophoneMuted;
-            loadingMix = false; ApplyVolumes(); Range.SetRange(start, end); EditorMessage.Text = "Clip renamed.";
+            loadingMix = false; ApplyVolumes(); Range.SetRange(start, end); UpdateSaveActions(); EditorMessage.Text = "Clip renamed.";
         }
-        catch (Exception ex) { EditorMessage.Text = ex.Message; await Open(path); }
+        catch (Exception ex) { await Open(path, gameName); EditorMessage.Text = ex.Message; }
     }
     private void CancelRename() { NameEdit.Visibility = Wpf.Visibility.Collapsed; NameDisplay.Visibility = Wpf.Visibility.Visible; }
     private void Name_Blurred(object sender, KeyboardFocusChangedEventArgs e) { if (NameEdit.Visibility == Wpf.Visibility.Visible) CancelRename(); }
@@ -252,7 +241,7 @@ public partial class ClipEditor : C.UserControl, IDisposable
     private void HideOverlay() { PlaybackOverlay.Opacity = 0; PlaybackOverlay.IsHitTestVisible = false; }
     private void Video_Enter(object sender, MouseEventArgs e) => ShowOverlay();
     private void Video_Move(object sender, MouseEventArgs e) => ShowOverlay();
-    private void Video_Leave(object sender, MouseEventArgs e) { if (!seeking) HideOverlay(); }
+    private void Video_Leave(object sender, MouseEventArgs e) { if (playing && !Range.IsAdjusting && !TrimChanged) HideOverlay(); }
     private void Video_Click(object sender, MouseButtonEventArgs e) { PreviewSurface.Focus(); TogglePlay(); e.Handled = true; }
     private void Fullscreen_Click(object sender, Wpf.RoutedEventArgs e) => ToggleFullscreen();
     private void ToggleFullscreen()
@@ -287,8 +276,8 @@ public partial class ClipEditor : C.UserControl, IDisposable
     }
     private void ClosePlayback()
     {
-        seeking = resumeAfterSeek = false;
-        if (SeekSlider.IsMouseCaptured) SeekSlider.ReleaseMouseCapture();
+        resumeAfterSeek = false;
+        Range.EndScrub();
         Pause(); Player.Close(); opened = false; timer.Stop();
         for (int i = 0; i < stems.Length; i++) { stems[i].Close(); stemReady[i] = false; }
         audioPreview?.Dispose(); audioPreview = null;
