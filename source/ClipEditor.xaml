@@ -21,17 +21,19 @@
         <Grid x:Name="VideoArea" Background="Transparent" MouseEnter="Video_Enter" MouseLeave="Video_Leave" MouseMove="Video_Move">
           <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Manual" Stretch="Uniform" ScrubbingEnabled="True" MediaOpened="Player_Opened" MediaEnded="Player_Ended" MediaFailed="Player_Failed" MouseLeftButtonDown="Video_Click"/>
           <TextBlock x:Name="PlayerPlaceholder" Text="Loading your clip…" Foreground="#839DBE" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
-          <Border x:Name="PlaybackOverlay" Background="#E6142032" VerticalAlignment="Bottom" Padding="14,10" Margin="8" CornerRadius="8" Opacity="0">
-            <StackPanel>
-              <local:TrimRange x:Name="Range" RangeChanged="Range_Changed" SeekRequested="Range_Seek" ScrubStarted="Range_ScrubStarted" ScrubEnded="Range_ScrubEnded" AutomationProperties.Name="Playback and trim timeline"/>
-              <Grid Margin="0,5,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <Button x:Name="PlayButton" Content="Play" Width="62" Click="Play_Click" Padding="8,7"/>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0"><TextBlock x:Name="PositionLabel" Text="0:00" FontFamily="Consolas" Foreground="#B6D4FF"/><TextBlock Text=" / " Foreground="#617C9E"/><TextBlock x:Name="DurationLabel" Text="0:00" Foreground="#93A9C8" FontFamily="Consolas"/></StackPanel>
-                <Slider x:Name="VolumeSlider" Grid.Column="2" Width="75" Minimum="0" Maximum="1" Value="0.75" ValueChanged="Volume_Changed" AutomationProperties.Name="Preview master volume" ToolTip="Preview master volume" Margin="10,0"/>
-                <Button x:Name="TrimButton" Grid.Column="3" Content="Save trim" Visibility="Collapsed" Style="{StaticResource Primary}" Click="Trim_Click" Margin="0,0,8,0" Padding="10,7" ToolTip="Save the selected range and playback mix."/>
-                <Button x:Name="FullscreenButton" Grid.Column="4" Content="&#xE740;" FontFamily="Segoe Fluent Icons" Click="Fullscreen_Click" AutomationProperties.Name="Fullscreen" ToolTip="Fullscreen · Esc to return" Padding="10,7"/>
-              </Grid>
-            </StackPanel>
+          <Border x:Name="PlaybackOverlay" Background="#E6142032" VerticalAlignment="Bottom" Padding="14,4" Margin="8" CornerRadius="8" Opacity="0">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <Button x:Name="PlayButton" Content="Play" Width="62" Click="Play_Click" Padding="8,7" VerticalAlignment="Center"/>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0"><TextBlock x:Name="PositionLabel" Text="0:00" FontFamily="Consolas" Foreground="#B6D4FF"/><TextBlock Text=" / " Foreground="#617C9E"/><TextBlock x:Name="DurationLabel" Text="0:00" Foreground="#93A9C8" FontFamily="Consolas"/></StackPanel>
+              <local:TrimRange x:Name="Range" Grid.Column="2" RangeChanged="Range_Changed" SeekRequested="Range_Seek" ScrubStarted="Range_ScrubStarted" ScrubEnded="Range_ScrubEnded" AutomationProperties.Name="Playback and trim timeline"/>
+              <Slider x:Name="VolumeSlider" Grid.Column="3" Width="75" Minimum="0" Maximum="1" Value="0.75" ValueChanged="Volume_Changed" AutomationProperties.Name="Preview master volume" ToolTip="Preview master volume" Margin="10,0" VerticalAlignment="Center"/>
+              <Button x:Name="TrimButton" Grid.Column="4" Content="Save trim" Visibility="Collapsed" Style="{StaticResource Primary}" Click="Trim_Click" Margin="0,0,8,0" Padding="10,7" VerticalAlignment="Center" ToolTip="Save the selected range and playback mix."/>
+              <Button x:Name="FullscreenButton" Grid.Column="5" Content="&#xE740;" FontFamily="Segoe Fluent Icons" Click="Fullscreen_Click" AutomationProperties.Name="Fullscreen" ToolTip="Fullscreen · Esc to return" Padding="10,7" VerticalAlignment="Center"/>
+            </Grid>
           </Border>
         </Grid>
       </Border>

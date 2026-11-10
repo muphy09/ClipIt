@@ -26,7 +26,7 @@ public sealed class TrimRange : C.Canvas
     private bool scrubbing;
     public TrimRange()
     {
-        Height = 58; Background = M.Brushes.Transparent; Focusable = true;
+        Height = 48; Background = M.Brushes.Transparent; Focusable = true;
         Children.Add(rail); Children.Add(selection); Children.Add(playhead); Children.Add(left); Children.Add(right);
         SizeChanged += (_, _) => Layout();
         left.DragDelta += (_, e) => MoveHandle(true, Delta(e.HorizontalChange));
@@ -88,10 +88,10 @@ public sealed class TrimRange : C.Canvas
     private double X(double value) => 8 + (Duration > 0 ? Math.Clamp(value / Duration, 0, 1) : 0) * Math.Max(0, ActualWidth - 16);
     private void Layout()
     {
-        rail.Width = Math.Max(0, ActualWidth - 16); SetLeft(rail, 8); SetTop(rail, 27);
-        selection.Width = Math.Max(0, X(End) - X(Start)); SetLeft(selection, X(Start)); SetTop(selection, 26);
-        SetLeft(left, X(Start) - 7); SetLeft(right, X(End) - 7); SetTop(left, 12); SetTop(right, 12);
-        SetLeft(playhead, X(position) - 1); SetTop(playhead, 6);
+        rail.Width = Math.Max(0, ActualWidth - 16); SetLeft(rail, 8); SetTop(rail, 22);
+        selection.Width = Math.Max(0, X(End) - X(Start)); SetLeft(selection, X(Start)); SetTop(selection, 21);
+        SetLeft(left, X(Start) - 7); SetLeft(right, X(End) - 7); SetTop(left, 7); SetTop(right, 7);
+        SetLeft(playhead, X(position) - 1); SetTop(playhead, 1);
         left.ToolTip = "Start · " + MediaTools.Time(Start); right.ToolTip = "End · " + MediaTools.Time(End);
     }
     private void MoveKey(KeyEventArgs e, bool start)

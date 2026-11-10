@@ -205,6 +205,14 @@ internal static class DesktopChecks
                 Require(trimButton.Visibility == Wpf.Visibility.Collapsed, "Full-length selection hides Save trim");
                 range.SetRange(1, 10);
                 Require(trimButton.Visibility == Wpf.Visibility.Visible, "Moving a trim handle shows Save trim");
+                var playbackOverlay = (C.Border)editor.FindName("PlaybackOverlay");
+                var playButton = (C.Button)editor.FindName("PlayButton");
+                var volumeSlider = (C.Slider)editor.FindName("VolumeSlider");
+                playbackOverlay.Measure(new Wpf.Size(650, 180));
+                playbackOverlay.Arrange(new Wpf.Rect(0, 0, 650, playbackOverlay.DesiredSize.Height));
+                Require(playbackOverlay.ActualHeight <= 58 && range.ActualWidth > 200
+                    && playButton.ActualWidth == 62 && volumeSlider.ActualWidth == 75 && trimButton.ActualHeight >= 28,
+                    "The compact playback overlay fits one row with full-size controls and room to trim");
                 range.SetRange(0, 10);
                 Require(trimButton.Visibility == Wpf.Visibility.Collapsed, "Restoring the full range hides Save trim again");
                 var game = (C.CheckBox)editor.FindName("GameEnabled");
