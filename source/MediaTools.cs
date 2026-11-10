@@ -181,8 +181,8 @@ internal static class MediaTools
     private static void TryDelete(string file) { try { if (File.Exists(file)) File.Delete(file); } catch { } }
     public static string Time(double seconds)
     {
-        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
-        return t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss\.ff") : t.ToString(@"mm\:ss\.ff");
+        var t = TimeSpan.FromSeconds(Math.Round(Math.Max(0, seconds), MidpointRounding.AwayFromZero));
+        return t.TotalHours >= 1 ? $@"{(long)t.TotalHours}:{t:mm\:ss}" : t.ToString(@"m\:ss");
     }
 }
 
