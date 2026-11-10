@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Win32;
+using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using C = System.Windows.Controls;
 using Wpf = System.Windows;
@@ -202,19 +203,33 @@ internal static class DesktopChecks
                     && C.Grid.GetColumn(trimButton) < C.Grid.GetColumn((Wpf.UIElement)editor.FindName("FullscreenButton")), "One timeline and Save trim live inside the preview controls");
                 typeof(ClipEditor).GetField("info", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(editor, new ClipInfo(10, 320, 180, 0, 0));
                 range.Setup(10);
-                Require(trimButton.Visibility == Wpf.Visibility.Collapsed, "Full-length selection hides Save trim");
-                range.SetRange(1, 10);
-                Require(trimButton.Visibility == Wpf.Visibility.Visible, "Moving a trim handle shows Save trim");
+                Require(trimButton.Visibility != Wpf.Visibility.Visible, "Full-length selection hides Save trim");
                 var playbackOverlay = (C.Border)editor.FindName("PlaybackOverlay");
                 var playButton = (C.Button)editor.FindName("PlayButton");
                 var volumeSlider = (C.Slider)editor.FindName("VolumeSlider");
-                playbackOverlay.Measure(new Wpf.Size(650, 180));
-                playbackOverlay.Arrange(new Wpf.Rect(0, 0, 650, playbackOverlay.DesiredSize.Height));
+                void LayoutPlaybackOverlay()
+                {
+                    playbackOverlay.Measure(new Wpf.Size(650, 180));
+                    playbackOverlay.Arrange(new Wpf.Rect(0, 0, 650, playbackOverlay.DesiredSize.Height));
+                    playbackOverlay.UpdateLayout();
+                }
+                LayoutPlaybackOverlay();
+                var endHandle = range.Children.OfType<Thumb>().Last();
+                double timelineWidth = range.ActualWidth;
+                double initialHandleLeft = C.Canvas.GetLeft(endHandle);
+                endHandle.RaiseEvent(new DragDeltaEventArgs(-12, 0));
+                LayoutPlaybackOverlay();
+                Require(trimButton.Visibility == Wpf.Visibility.Visible && range.ActualWidth == timelineWidth
+                    && Math.Abs(C.Canvas.GetLeft(endHandle) - (initialHandleLeft - 12)) < .01,
+                    "The right trim handle follows the drag as Save trim appears without resizing the timeline");
                 Require(playbackOverlay.ActualHeight <= 58 && range.ActualWidth > 200
                     && playButton.ActualWidth == 62 && volumeSlider.ActualWidth == 75 && trimButton.ActualHeight >= 28,
                     "The compact playback overlay fits one row with full-size controls and room to trim");
-                range.SetRange(0, 10);
-                Require(trimButton.Visibility == Wpf.Visibility.Collapsed, "Restoring the full range hides Save trim again");
+                endHandle.RaiseEvent(new DragDeltaEventArgs(12, 0));
+                LayoutPlaybackOverlay();
+                Require(trimButton.Visibility != Wpf.Visibility.Visible && range.ActualWidth == timelineWidth
+                    && Math.Abs(C.Canvas.GetLeft(endHandle) - initialHandleLeft) < .01,
+                    "Restoring the full range hides Save trim without resizing the timeline");
                 var game = (C.CheckBox)editor.FindName("GameEnabled");
                 var discord = (C.CheckBox)editor.FindName("DiscordEnabled");
                 var mic = (C.CheckBox)editor.FindName("MicrophoneEnabled");

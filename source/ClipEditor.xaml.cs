@@ -179,7 +179,9 @@ public partial class ClipEditor : C.UserControl, IDisposable
     private bool TrimChanged => info != null && (Range.Start > .0001 || Range.Duration - Range.End > .0001);
     private void UpdateSaveActions()
     {
-        TrimButton.Visibility = !isLinked && TrimChanged ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+        // Keep the timeline width fixed as the save action appears during a drag.
+        TrimButton.Visibility = isLinked ? Wpf.Visibility.Collapsed
+            : TrimChanged ? Wpf.Visibility.Visible : Wpf.Visibility.Hidden;
         SaveMixButton.Visibility = !isLinked && !Busy && !TrimChanged && info != null && CurrentMix() != info.Mix
             ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
     }

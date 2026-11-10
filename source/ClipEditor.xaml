@@ -31,7 +31,7 @@
               <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0"><TextBlock x:Name="PositionLabel" Text="0:00" FontFamily="Consolas" Foreground="#B6D4FF"/><TextBlock Text=" / " Foreground="#617C9E"/><TextBlock x:Name="DurationLabel" Text="0:00" Foreground="#93A9C8" FontFamily="Consolas"/></StackPanel>
               <local:TrimRange x:Name="Range" Grid.Column="2" RangeChanged="Range_Changed" SeekRequested="Range_Seek" ScrubStarted="Range_ScrubStarted" ScrubEnded="Range_ScrubEnded" AutomationProperties.Name="Playback and trim timeline"/>
               <Slider x:Name="VolumeSlider" Grid.Column="3" Width="75" Minimum="0" Maximum="1" Value="0.75" ValueChanged="Volume_Changed" AutomationProperties.Name="Preview master volume" ToolTip="Preview master volume" Margin="10,0" VerticalAlignment="Center"/>
-              <Button x:Name="TrimButton" Grid.Column="4" Content="Save trim" Visibility="Collapsed" Style="{StaticResource Primary}" Click="Trim_Click" Margin="0,0,8,0" Padding="10,7" VerticalAlignment="Center" ToolTip="Save the selected range and playback mix."/>
+              <Button x:Name="TrimButton" Grid.Column="4" Content="Save trim" Visibility="Hidden" Style="{StaticResource Primary}" Click="Trim_Click" Margin="0,0,8,0" Padding="10,7" VerticalAlignment="Center" ToolTip="Save the selected range and playback mix."/>
               <Button x:Name="FullscreenButton" Grid.Column="5" Content="&#xE740;" FontFamily="Segoe Fluent Icons" Click="Fullscreen_Click" AutomationProperties.Name="Fullscreen" ToolTip="Fullscreen · Esc to return" Padding="10,7" VerticalAlignment="Center"/>
             </Grid>
           </Border>
