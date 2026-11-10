@@ -6,6 +6,7 @@ public sealed record Settings
 {
     public string Folder { get; init; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "ClipIt");
     public string PortalFolder { get; init; } = "";
+    public bool GameTileView { get; init; }
     public string Monitor { get; init; } = "";
     public int Height { get; init; } = 1080;
     public int Fps { get; init; } = 60;

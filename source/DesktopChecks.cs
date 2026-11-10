@@ -45,7 +45,7 @@ internal static class DesktopChecks
                     Require(rejected, $"Invalid replay length {seconds}s is rejected");
                 }
                 Require(!initial.StartWithWindows && !initial.StartMinimized && initial.Overlay, "Existing settings safely default to manual startup and enabled overlay");
-                var settings = initial with { Folder = Path.Combine(data, "clips"), ReplaySeconds = 30, GameWindow = ":ClipItWaiting:__clipit_no_game__.exe", StartWithWindows = true, StartMinimized = true, Modifiers = 3, Key = 118, LibraryModifiers = 3, LibraryKey = 121 };
+                var settings = initial with { Folder = Path.Combine(data, "clips"), ReplaySeconds = 30, GameWindow = ":ClipItWaiting:__clipit_no_game__.exe", StartWithWindows = true, StartMinimized = true, GameTileView = true, Modifiers = 3, Key = 118, LibraryModifiers = 3, LibraryKey = 121 };
                 settings.Save();
                 Require(Settings.Load() == settings, "Startup, minimized and overlay preferences survive reload");
                 string registryPath = @"Software\ClipIt.Checks." + Guid.NewGuid().ToString("N");
@@ -172,6 +172,13 @@ internal static class DesktopChecks
                 Require(((Wpf.FrameworkElement)window.FindName("LocationNotice")).Visibility == Wpf.Visibility.Collapsed && shortcutBox.Text == Settings.Load().Shortcut.Replace("+", " + "), "Leaving shortcut entry restores its binding and clears the warning");
                 window.SaveLibraryShortcut(0, 65);
                 ((C.Button)window.FindName("LibraryNav")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                var savedViewLibrary = (ClipLibrary)((C.Border)window.FindName("LibraryHost")).Child;
+                var savedTiles = (C.RadioButton)savedViewLibrary.FindName("TileViewButton");
+                Require(savedTiles.IsChecked == true, "A new ClipIt window restores the saved Tiles preference");
+                ((C.RadioButton)savedViewLibrary.FindName("ListViewButton")).IsChecked = true;
+                Require(!Settings.Load().GameTileView, "Selecting List saves the choice immediately");
+                savedTiles.IsChecked = true;
+                Require(Settings.Load().GameTileView, "Selecting Tiles saves the choice immediately");
                 ((C.Button)window.FindName("CaptureNav")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
                 Require(((Wpf.FrameworkElement)window.FindName("LocationNotice")).Visibility == Wpf.Visibility.Collapsed && pendingBar.Visibility == Wpf.Visibility.Collapsed, "Switching to Your Clips and back leaves no stale shortcut warning or Apply bar");
                 window.Hide(); window.ShowInTaskbar = false;
@@ -329,6 +336,35 @@ internal static class DesktopChecks
                     Require(!ClipFiles.IsFavorite(legacyClip, libraryRoot) && File.Exists(legacyClip), "An existing favorite can be unmarked in place");
                     Require(MediaTools.Gigabytes(1048576000).EndsWith(" GB") && MediaTools.Gigabytes(100).StartsWith("<"),
                         "Clip size uses GB and shows very small files as below the display threshold");
+
+                    File.WriteAllText(Path.Combine(gameFolder, "First goal.mp4"), "tile fixture");
+                    File.WriteAllText(Path.Combine(gameFolder, "Third goal.mp4"), "tile fixture");
+                    var tileWindow = new Wpf.Window { Content = testLibrary, Width = 720, Height = 520, ShowInTaskbar = false };
+                    try
+                    {
+                        tileWindow.Show();
+                        ((C.RadioButton)testLibrary.FindName("ByGameTab")).IsChecked = true;
+                        openGame.Invoke(testLibrary, ["Rocket League"]);
+                        for (int i = 0; i < 40 && list.Items.Count != 3; i++) await Task.Delay(50);
+                        var originalPanel = list.ItemsPanel;
+                        var tiles = (C.RadioButton)testLibrary.FindName("TileViewButton");
+                        Require(tiles.IsVisible && list.Items.Count == 3, "Game folders show the view switch and their own clips");
+                        tiles.IsChecked = true;
+                        await tileWindow.Dispatcher.InvokeAsync(tileWindow.UpdateLayout, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                        Wpf.Point TileOrigin(int index) => ((C.ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(index)).TranslatePoint(new Wpf.Point(), list);
+                        Require(TileOrigin(1).X > TileOrigin(0).X && TileOrigin(2).Y > TileOrigin(0).Y,
+                            "Tile view wraps the third card onto a new row in a narrower window");
+                        tileWindow.Width = 1020;
+                        await tileWindow.Dispatcher.InvokeAsync(tileWindow.UpdateLayout, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                        Require(TileOrigin(2).X > TileOrigin(1).X && Math.Abs(TileOrigin(2).Y - TileOrigin(0).Y) < 1,
+                            "Tile view adds a third column when the window widens");
+                        ((C.RadioButton)testLibrary.FindName("ListViewButton")).IsChecked = true;
+                        Require(list.ItemsPanel == originalPanel && list.Items.Count == 3, "List view restores the original layout without leaving the game");
+                        tiles.IsChecked = true;
+                        testLibrary.ShowRecent();
+                        Require(!tiles.IsVisible && list.ItemsPanel == originalPanel, "Recent keeps its list layout and hides the game view switch");
+                    }
+                    finally { tileWindow.Close(); }
                 }
 
                 var overlay = new RecordingOverlay();

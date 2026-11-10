@@ -471,7 +471,13 @@ public partial class ClipWindow : Wpf.Window
     {
         ClearNotices();
         ShowSettings();
-        if (library == null) { library = new ClipLibrary(); LibraryHost.Child = library; }
+        if (library == null)
+        {
+            library = new ClipLibrary();
+            library.RestoreGameView(settings.GameTileView);
+            library.GameViewPreferenceChanged += SaveGameView;
+            LibraryHost.Child = library;
+        }
         library.SetFolder(settings.Folder, settings.PortalFolder);
         library.ShowDashboard();
         CapturePanel.Visibility = Wpf.Visibility.Collapsed; LibraryHost.Visibility = Wpf.Visibility.Visible;
@@ -479,6 +485,12 @@ public partial class ClipWindow : Wpf.Window
         SettingsNav.Background = SettingsNav.BorderBrush = Media.Brushes.Transparent;
         LibraryNav.Background = Brush("#14294A"); LibraryNav.BorderBrush = Brush("#244876");
         CaptureNav.Background = Media.Brushes.Transparent; CaptureNav.BorderBrush = Media.Brushes.Transparent;
+    }
+    private void SaveGameView(bool tiles)
+    {
+        var updated = settings with { GameTileView = tiles };
+        updated.Save();
+        settings = updated; recorder.Settings = updated;
     }
     private void Capture_Click(object sender, Wpf.RoutedEventArgs e)
     {

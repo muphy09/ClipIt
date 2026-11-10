@@ -24,13 +24,20 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private ClipItem? mouseClip;
     private bool dragged, disposed;
     private string? selectedGame;
+    private readonly C.ItemsPanelTemplate listPanel;
+    private readonly Wpf.DataTemplate listTemplate;
+    private C.ScrollViewer? clipScroll;
+    private bool showingTiles;
     private ClipItem? menuClip;
     private readonly HashSet<string> deleting = new(StringComparer.OrdinalIgnoreCase);
     public bool Busy => Editor.Busy;
+    internal event Action<bool>? GameViewPreferenceChanged;
     private readonly Dictionary<string, ClipItem> items = new(StringComparer.OrdinalIgnoreCase);
     public ClipLibrary()
     {
         InitializeComponent(); ClipsList.ItemsSource = clips;
+        listPanel = ClipsList.ItemsPanel;
+        listTemplate = ClipsList.ItemTemplate;
         refreshTimer.Tick += async (_, _) => { refreshTimer.Stop(); await Reload(); };
         IsVisibleChanged += async (_, _) => { if (IsVisible) await Reload(); else Editor.Pause(); };
     }
@@ -145,12 +152,50 @@ public partial class ClipLibrary : C.UserControl, IDisposable
             : byGame ? ordered.Where(c => string.Equals(c.Application, selectedGame, StringComparison.OrdinalIgnoreCase))
             : ordered;
         foreach (var item in visibleClips) clips.Add(item);
+        UpdateGameView();
+        if (showingTiles) _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, LoadVisibleTiles);
         EmptyState.Visibility = (folders ? games.Length == 0 : clips.Count == 0) ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
         EmptyTitle.Text = favorites ? "No favorites yet." : selectedGame != null && byGame ? "No clips in this game yet." : "Your next highlight lives here.";
         EmptyHint.Text = favorites ? "Open a clip and choose Mark as Favorite to add it here." : "Save a replay, or drop MP4 clips here to add them.";
         LibraryHint.Text = folders ? "Games A–Z. Open a folder to see its clips." : "Newest first. Click to open, right-click for options, or drag to another app.";
     }
     private void Tab_Changed(object sender, Wpf.RoutedEventArgs e) => UpdateView();
+    internal void RestoreGameView(bool tiles) => (tiles ? TileViewButton : ListViewButton).IsChecked = true;
+
+    private void GameView_Changed(object sender, Wpf.RoutedEventArgs e)
+    {
+        UpdateGameView();
+        try { GameViewPreferenceChanged?.Invoke(TileViewButton.IsChecked == true); }
+        catch (Exception ex) { LibraryMessage.Text = "Could not save the game view: " + ex.Message; }
+    }
+    private void UpdateGameView()
+    {
+        if (ClipsList == null) return;
+        bool tiles = ByGameTab.IsChecked == true && selectedGame != null && TileViewButton.IsChecked == true;
+        if (tiles == showingTiles) return;
+        showingTiles = tiles;
+        ClipsList.ItemsPanel = tiles ? (C.ItemsPanelTemplate)Resources["TilePanel"] : listPanel;
+        ClipsList.ItemTemplate = tiles ? (Wpf.DataTemplate)Resources["TileTemplate"] : listTemplate;
+        ClipsList.ItemContainerStyle = (Wpf.Style)Resources[tiles ? "TileCard" : "ClipCard"];
+        if (tiles) ClipsList.SetValue(C.ScrollViewer.CanContentScrollProperty, false);
+        else ClipsList.ClearValue(C.ScrollViewer.CanContentScrollProperty);
+        clipScroll?.ScrollToTop();
+        if (tiles) _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, LoadVisibleTiles);
+    }
+
+    private void Clips_ScrollChanged(object sender, C.ScrollChangedEventArgs e)
+    {
+        if (e.OriginalSource is not C.ScrollViewer scroll) return;
+        clipScroll = scroll;
+        LoadVisibleTiles();
+    }
+    private void LoadVisibleTiles()
+    {
+        if (disposed || !showingTiles || !ClipsList.IsVisible
+            || clipScroll is not { ViewportWidth: > 0, ViewportHeight: > 0 } scroll) return;
+        var (start, end) = ClipTilePanel.VisibleItems(scroll.ViewportWidth, scroll.VerticalOffset, scroll.ViewportHeight, clips.Count);
+        for (int i = start; i < end; i++) RequestThumbnail(clips[i]);
+    }
     private void Games_Back(object sender, Wpf.RoutedEventArgs e) { selectedGame = null; UpdateView(); }
     private void Game_Click(object sender, MouseButtonEventArgs e)
     {
@@ -219,7 +264,12 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     }
     private void Thumbnail_Loaded(object sender, Wpf.RoutedEventArgs e)
     {
-        if (sender is not C.Image { DataContext: ClipItem item } || item.PreviewTask is { IsCompleted: false } || item.Read || deleting.Contains(item.Path)) return;
+        if (sender is C.Image { DataContext: ClipItem item }) RequestThumbnail(item);
+    }
+    private void RequestThumbnail(ClipItem item)
+    {
+        if (item.PreviewTask is { IsCompleted: false } || deleting.Contains(item.Path)
+            || item.PreviewFailed || (item.Thumbnail != null && (showingTiles || item.DetailsLoaded))) return;
         item.PreviewTask = LoadThumbnail(item);
     }
     private async Task LoadThumbnail(ClipItem item)
@@ -228,13 +278,36 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         item.PreviewCancellation = cancellation;
         try
         {
-            var info = await MediaTools.Probe(item.Path, cancellation.Token);
             string thumbnail = await MediaTools.Thumbnail(item.Path, item.Stamp, cancellation.Token);
-            var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.DecodePixelWidth = 320; image.UriSource = new Uri(thumbnail); image.EndInit(); image.Freeze();
-            item.SetInfo(info, image);
+            if (item.Thumbnail == null)
+            {
+                var image = await Task.Run(() =>
+                {
+                    var bitmap = new BitmapImage();
+                    bitmap.BeginInit();
+                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                    bitmap.DecodePixelWidth = 320;
+                    bitmap.UriSource = new Uri(thumbnail);
+                    bitmap.EndInit();
+                    bitmap.Freeze();
+                    return bitmap;
+                }, cancellation.Token);
+                cancellation.Token.ThrowIfCancellationRequested();
+                item.SetThumbnail(image);
+            }
+            if (!showingTiles)
+            {
+                var info = await MediaTools.PreviewInfo(item.Path, thumbnail, cancellation.Token);
+                item.SetDetails(info);
+            }
         }
         catch (OperationCanceledException) { }
-        catch { item.SetDetail($"{MediaTools.Gigabytes(item.Stamp.Size)}  ·  Preview unavailable · click to retry playback"); }
+        catch
+        {
+            item.PreviewFailed = item.Thumbnail == null;
+            item.DetailsLoaded = true;
+            if (item.PreviewFailed) item.SetDetail($"{MediaTools.Gigabytes(item.Stamp.Size)}  ·  Preview unavailable · click to retry playback");
+        }
         finally { item.PreviewCancellation = null; }
     }
     public async Task OpenClip(string path)
@@ -363,15 +436,21 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         public BitmapImage? Thumbnail { get; private set; }
         public Task? PreviewTask;
         public CancellationTokenSource? PreviewCancellation;
-        public bool Read;
+        public bool PreviewFailed;
+        public bool DetailsLoaded;
         public event PropertyChangedEventHandler? PropertyChanged;
         public ClipItem(string path, ClipStamp stamp, string application, bool isFavorite, bool isLinked)
         {
             Path = path; Stamp = stamp; Application = application; IsFavorite = isFavorite; IsLinked = isLinked;
             Title = isLinked ? System.IO.Path.GetFileNameWithoutExtension(path) : ClipFiles.Title(path, application);
-            Detail = $"{MediaTools.Gigabytes(stamp.Size)}  ·  Loading preview…";
+            Detail = MediaTools.Gigabytes(stamp.Size);
         }
-        public void SetInfo(ClipInfo info, BitmapImage image) { Read = true; Thumbnail = image; Detail = $"{MediaTools.Time(info.Duration)}  ·  {info.Width} × {info.Height}  ·  {MediaTools.Gigabytes(info.Size)}"; PropertyChanged?.Invoke(this, new(nameof(Thumbnail))); PropertyChanged?.Invoke(this, new(nameof(Detail))); }
+        public void SetThumbnail(BitmapImage image) { Thumbnail = image; PropertyChanged?.Invoke(this, new(nameof(Thumbnail))); }
+        public void SetDetails(ClipPreviewInfo info)
+        {
+            DetailsLoaded = true;
+            SetDetail($"{MediaTools.Time(info.Duration)}  ·  {info.Width} × {info.Height}  ·  {MediaTools.Gigabytes(Stamp.Size)}");
+        }
         public void SetDetail(string text) { Detail = text; PropertyChanged?.Invoke(this, new(nameof(Detail))); }
     }
 }

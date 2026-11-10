@@ -26,6 +26,8 @@ public readonly record struct ClipStamp(long Size, DateTime Modified)
     public static ClipStamp Read(string path) { var f = new FileInfo(path); return new(f.Length, f.LastWriteTimeUtc); }
 }
 
+internal sealed record ClipPreviewInfo(double Duration, int Width, int Height);
+
 internal static class MediaTools
 {
     public static string Gigabytes(long bytes)
@@ -114,6 +116,29 @@ internal static class MediaTools
             return target;
         }
         finally { TryDelete(temporary); ThumbnailSlots.Release(); }
+    }
+
+    public static async Task<ClipPreviewInfo> PreviewInfo(string path, string thumbnail, CancellationToken token)
+    {
+        string target = thumbnail + ".json";
+        try
+        {
+            if (File.Exists(target) && JsonSerializer.Deserialize<ClipPreviewInfo>(await File.ReadAllTextAsync(target, token)) is { } cached)
+                return cached;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
+
+        var info = await Probe(path, token);
+        var preview = new ClipPreviewInfo(info.Duration, info.Width, info.Height);
+        string temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(preview), token);
+            File.Move(temporary, target, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        finally { TryDelete(temporary); }
+        return preview;
     }
 
     public static async Task<AudioPreview> ExtractStems(string file, CancellationToken token)

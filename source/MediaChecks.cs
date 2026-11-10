@@ -10,6 +10,7 @@ internal static class MediaChecks
     {
         string folder = Path.Combine(Path.GetFullPath(root), "media-check-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
+        Environment.SetEnvironmentVariable("CLIPIT_DATA", Path.Combine(folder, "app-data"));
         var checks = new List<string>();
         string original = Path.Combine(folder, "original.mp4"), exported = Path.Combine(folder, "export.mp4");
         string Hash(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
@@ -19,6 +20,19 @@ internal static class MediaChecks
             var generated = await MediaTools.Run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=60:duration=8", "-f", "lavfi", "-i", "sine=frequency=440:duration=8", "-f", "lavfi", "-i", "sine=frequency=880:duration=8", "-map", "0:v:0", "-map", "1:a:0", "-map", "2:a:0", "-c:v", "libx264", "-threads", "2", "-preset", "ultrafast", "-c:a", "aac", "-shortest", "-y", original], CancellationToken.None);
             Require(generated.Exit == 0, "Generated isolated test video with two audio tracks");
             string before = Hash(original); var stamp = ClipStamp.Read(original);
+            string thumbnail = await MediaTools.Thumbnail(original, stamp, CancellationToken.None);
+            var previewInfo = await MediaTools.PreviewInfo(original, thumbnail, CancellationToken.None);
+            Require(File.Exists(thumbnail) && previewInfo.Width == 320 && previewInfo.Height == 180 && Math.Abs(previewInfo.Duration - 8) < .1,
+                "A fresh thumbnail and its list details can be cached");
+            string offline = original + ".offline";
+            File.Move(original, offline);
+            try
+            {
+                Require(await MediaTools.Thumbnail(original, stamp, CancellationToken.None) == thumbnail
+                    && await MediaTools.PreviewInfo(original, thumbnail, CancellationToken.None) == previewInfo,
+                    "Cached thumbnails and list details are reusable without opening the source video");
+            }
+            finally { File.Move(offline, original); }
             bool rejected = false;
             try { await MediaTools.Trim(original, original, 3, 2, stamp, CancellationToken.None); } catch (ArgumentException) { rejected = true; }
             Require(rejected && Hash(original) == before, "Invalid range preserves original bytes");
