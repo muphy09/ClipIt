@@ -24,6 +24,9 @@ public sealed record Settings
     public bool StartMinimized { get; init; }
     public bool Overlay { get; init; } = true;
     public bool BufferInMemory { get; init; }
+    public string RecordingFolder { get; init; } = "";
+    internal string RecordingsPath => RecordingFolder.Length == 0 ? Path.Combine(Folder, "Recordings") : RecordingFolder;
+    public RecordingOptions Recording { get; init; } = new();
     public uint Modifiers { get; init; } = 1; // Alt
     public uint Key { get; init; } = (uint)Keys.B;
     public uint LibraryModifiers { get; init; } = 5; // Alt + Shift
@@ -55,14 +58,19 @@ public sealed record Settings
     public Settings Validated()
     {
         if (!Path.IsPathFullyQualified(Folder)) throw new ArgumentException("Choose an absolute save folder.");
+        if (!Path.IsPathFullyQualified(RecordingsPath)) throw new ArgumentException("Choose an absolute recording folder.");
         if (Height < 2 || Height > 32768 || Height % 2 != 0 || Fps is not (30 or 60) || Bitrate < 5000 || Bitrate > 100000)
             throw new ArgumentException("Invalid recording quality settings.");
         if (Key < 1 || Key > 254 || Modifiers > 15 || (Modifiers & 3) == 0)
             throw new ArgumentException("The shortcut must include Ctrl or Alt.");
         if (LibraryKey < 1 || LibraryKey > 254 || LibraryModifiers > 15 || (LibraryModifiers & 3) == 0)
             throw new ArgumentException("The Your Clips shortcut must include Ctrl or Alt.");
-        if (ReplaySeconds < 30 || ReplaySeconds > 300 || ReplaySeconds % 30 != 0)
-            throw new ArgumentException("Replay length must be 30 seconds to 5 minutes, in 30-second steps.");
+        if (Recording.Key is < 1 or > 254 || Recording.Modifiers > 15 || (Recording.Modifiers & 3) == 0)
+            throw new ArgumentException("The recording shortcut must include Ctrl or Alt.");
+        if (Recording.Height is < 2 or > 32768 || Recording.Height % 2 != 0 || Recording.Fps is not (30 or 60) || Recording.Minutes is < 1 or > 99999)
+            throw new ArgumentException("Invalid recording settings.");
+        if (ReplaySeconds < 30 || ReplaySeconds > 600 || ReplaySeconds % 30 != 0)
+            throw new ArgumentException("Replay length must be 30 seconds to 10 minutes, in 30-second steps.");
         return this;
     }
     public void Save()
@@ -75,6 +83,7 @@ public sealed record Settings
     }
     public string Shortcut => $"{((Modifiers & 2) != 0 ? "Ctrl+" : "")}{((Modifiers & 1) != 0 ? "Alt+" : "")}{((Modifiers & 4) != 0 ? "Shift+" : "")}{((Modifiers & 8) != 0 ? "Win+" : "")}{(Keys)Key}";
     public string LibraryShortcut => (this with { Modifiers = LibraryModifiers, Key = LibraryKey }).Shortcut;
+    public string RecordingShortcut => (this with { Modifiers = Recording.Modifiers, Key = Recording.Key }).Shortcut;
 }
 
 internal static class Log
@@ -96,4 +105,5 @@ internal static class Log
     }
 }
 
-public sealed record WorkerMessage(string Type, string Text = "", int Seconds = 0, int Frames = 0, string Path = "");
+public sealed record WorkerMessage(string Type, string Text = "", int Seconds = 0, int Frames = 0, string Path = "",
+    long Bytes = 0, int GameLevel = 0, int MicLevel = 0);

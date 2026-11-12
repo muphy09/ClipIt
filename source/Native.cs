@@ -17,6 +17,7 @@ internal static class Obs
         public int ColorSpace, Range, Scale;
     }
     [StructLayout(LayoutKind.Sequential)] internal struct AudioInfo { public uint Rate; public int Speakers; }
+    [StructLayout(LayoutKind.Sequential)] internal struct Vec2 { public float X, Y; }
     [StructLayout(LayoutKind.Sequential)] internal struct CallData
     {
         public nint Stack;
@@ -24,6 +25,7 @@ internal static class Obs
         [MarshalAs(UnmanagedType.I1)] public bool Fixed;
     }
     [UnmanagedFunctionPointer(C)] internal delegate void Signal(nint data, nint callData);
+    [UnmanagedFunctionPointer(C)] internal delegate void AudioMeterUpdated(nint data, nint magnitude, nint peak, nint inputPeak);
 
     [DllImport(Dll, CallingConvention=C)] [return:MarshalAs(UnmanagedType.I1)] internal static extern bool obs_startup([MarshalAs(UnmanagedType.LPUTF8Str)] string locale, [MarshalAs(UnmanagedType.LPUTF8Str)] string config, nint profiler);
     [DllImport(Dll, CallingConvention=C)] internal static extern void obs_shutdown();
@@ -55,6 +57,17 @@ internal static class Obs
     [DllImport(Dll, CallingConvention=C)] internal static extern uint obs_source_get_width(nint source);
     [DllImport(Dll, CallingConvention=C)] internal static extern uint obs_source_get_height(nint source);
     [DllImport(Dll, CallingConvention=C)] internal static extern void obs_set_output_source(uint channel, nint source);
+    [DllImport(Dll, CallingConvention=C)] internal static extern nint obs_scene_create([MarshalAs(UnmanagedType.LPUTF8Str)] string name);
+    [DllImport(Dll, CallingConvention=C)] internal static extern void obs_scene_release(nint scene);
+    [DllImport(Dll, CallingConvention=C)] internal static extern nint obs_scene_get_source(nint scene);
+    [DllImport(Dll, CallingConvention=C)] internal static extern nint obs_scene_add(nint scene, nint source);
+    [DllImport(Dll, CallingConvention=C)] internal static extern void obs_sceneitem_set_bounds_type(nint item, int type);
+    [DllImport(Dll, CallingConvention=C)] internal static extern void obs_sceneitem_set_bounds_alignment(nint item, uint alignment);
+    [DllImport(Dll, CallingConvention=C)] internal static extern void obs_sceneitem_set_bounds(nint item, ref Vec2 bounds);
+    [DllImport(Dll, CallingConvention=C)] internal static extern nint obs_volmeter_create(int faderType);
+    [DllImport(Dll, CallingConvention=C)] internal static extern void obs_volmeter_destroy(nint meter);
+    [DllImport(Dll, CallingConvention=C)] [return:MarshalAs(UnmanagedType.I1)] internal static extern bool obs_volmeter_attach_source(nint meter, nint source);
+    [DllImport(Dll, CallingConvention=C)] internal static extern void obs_volmeter_add_callback(nint meter, AudioMeterUpdated callback, nint data);
     [DllImport(Dll, CallingConvention=C)] internal static extern nint obs_video_encoder_create([MarshalAs(UnmanagedType.LPUTF8Str)] string id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, nint settings, nint hotkeys);
     [DllImport(Dll, CallingConvention=C)] internal static extern nint obs_audio_encoder_create([MarshalAs(UnmanagedType.LPUTF8Str)] string id, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, nint settings, nuint mixer, nint hotkeys);
     [DllImport(Dll, CallingConvention=C)] internal static extern void obs_encoder_release(nint encoder);
@@ -69,6 +82,8 @@ internal static class Obs
     [DllImport(Dll, CallingConvention=C)] internal static extern void obs_output_set_audio_encoder(nint output, nint encoder, nuint index);
     [DllImport(Dll, CallingConvention=C)] [return:MarshalAs(UnmanagedType.I1)] internal static extern bool obs_output_start(nint output);
     [DllImport(Dll, CallingConvention=C)] internal static extern void obs_output_stop(nint output);
+    [DllImport(Dll, CallingConvention=C)] internal static extern void obs_output_force_stop(nint output);
+    [DllImport(Dll, CallingConvention=C)] [return:MarshalAs(UnmanagedType.I1)] internal static extern bool obs_output_pause(nint output, [MarshalAs(UnmanagedType.I1)] bool pause);
     [DllImport(Dll, CallingConvention=C)] [return:MarshalAs(UnmanagedType.I1)] internal static extern bool obs_output_active(nint output);
     [DllImport(Dll, CallingConvention=C)] internal static extern int obs_output_get_total_frames(nint output);
     [DllImport(Dll, CallingConvention=C)] internal static extern nint obs_output_get_last_error(nint output);

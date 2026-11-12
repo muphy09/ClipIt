@@ -42,20 +42,23 @@
     <Grid x:Name="Dashboard">
       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
       <Grid Margin="0,0,0,22">
-        <StackPanel><TextBlock Text="Your Clips" FontSize="27" FontWeight="SemiBold"/><TextBlock x:Name="SummaryLabel" Text="Your moments, ready to make yours." Style="{StaticResource MutedText}" Margin="0,6,0,0"/></StackPanel>
+        <StackPanel><TextBlock x:Name="LibraryHeading" Text="Your Clips" FontSize="27" FontWeight="SemiBold"/><TextBlock x:Name="SummaryLabel" Text="Your moments, ready to make yours." Style="{StaticResource MutedText}" Margin="0,6,0,0"/></StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"><Button Content="Open folder" Click="Folder_Click" Style="{StaticResource Quiet}"/><Button Content="Import clips" Click="Import_Click" Margin="8,0,0,0"/></StackPanel>
       </Grid>
       <StackPanel Grid.Row="1" Margin="0,0,0,16">
-        <StackPanel Orientation="Horizontal">
-          <RadioButton x:Name="RecentTab" Content="Recent" GroupName="LibraryTab" IsChecked="True" Style="{StaticResource LibraryTab}" Checked="Tab_Changed"/>
-          <RadioButton x:Name="ByGameTab" Content="By Game" GroupName="LibraryTab" Margin="8,0,0,0" Style="{StaticResource LibraryTab}" Checked="Tab_Changed"/>
-          <RadioButton x:Name="FavoritesTab" Content="Favorites" GroupName="LibraryTab" Margin="8,0,0,0" Style="{StaticResource LibraryTab}" Checked="Tab_Changed"/>
-        </StackPanel>
-        <DockPanel x:Name="GameNavigation" Visibility="Collapsed" Margin="0,12,0,0">
-          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
+        <DockPanel>
+          <StackPanel x:Name="ViewSwitch" DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
             <RadioButton x:Name="ListViewButton" Content="List" GroupName="GameView" IsChecked="True" Style="{StaticResource LibraryTab}" Checked="GameView_Changed" AutomationProperties.Name="List view"/>
             <RadioButton x:Name="TileViewButton" Content="Tiles" GroupName="GameView" Style="{StaticResource LibraryTab}" Checked="GameView_Changed" AutomationProperties.Name="Tile view"/>
           </StackPanel>
+          <StackPanel x:Name="LibraryTabs" Orientation="Horizontal">
+          <RadioButton x:Name="RecentTab" Content="Recent" GroupName="LibraryTab" IsChecked="True" Style="{StaticResource LibraryTab}" Checked="Tab_Changed"/>
+          <RadioButton x:Name="ByGameTab" Content="By Game" GroupName="LibraryTab" Margin="8,0,0,0" Style="{StaticResource LibraryTab}" Checked="Tab_Changed"/>
+          <RadioButton x:Name="RecordingsTab" Content="Recordings" GroupName="LibraryTab" Margin="8,0,0,0" Style="{StaticResource LibraryTab}" Checked="Tab_Changed"/>
+          <RadioButton x:Name="FavoritesTab" GroupName="LibraryTab" Visibility="Collapsed" Checked="Tab_Changed"/>
+          </StackPanel>
+        </DockPanel>
+        <DockPanel x:Name="GameNavigation" Visibility="Collapsed" Margin="0,12,0,0">
           <Button DockPanel.Dock="Left" Content="‹ All Games" Click="Games_Back" Style="{StaticResource Quiet}" Padding="8,8" Margin="0,0,16,0"/>
           <TextBlock x:Name="GameTitle" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
         </DockPanel>

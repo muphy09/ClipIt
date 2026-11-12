@@ -13,12 +13,13 @@ public sealed record MixSettings(double Game = 1, double Discord = 1, double Mic
     public double GameGain => GameMuted ? 0 : Safe(Game);
     public double DiscordGain => DiscordMuted ? 0 : Safe(Discord);
     public double MicrophoneGain => MicrophoneMuted ? 0 : Safe(Microphone);
-    private static double Safe(double value) => double.IsFinite(value) ? Math.Clamp(value, 0, 1) : 1;
+    private static double Safe(double value) => double.IsFinite(value) ? Math.Clamp(value, 0, 2) : 1;
 }
 public sealed record ClipInfo(double Duration, int Width, int Height, int AudioTracks, long Size)
 {
     public List<AudioTrackInfo> Tracks { get; init; } = [];
     public MixSettings Mix { get; init; } = new();
+    public int? OriginalMixTrack => Tracks.FirstOrDefault(t => t.Name == "ClipIt Original Mix")?.Index;
     public bool HasStems => Tracks.Count == 4 && Tracks[0].Name.Contains("ClipIt", StringComparison.OrdinalIgnoreCase);
 }
 public readonly record struct ClipStamp(long Size, DateTime Modified)
@@ -141,16 +142,24 @@ internal static class MediaTools
         return preview;
     }
 
-    public static async Task<AudioPreview> ExtractStems(string file, CancellationToken token)
+    public static async Task<AudioPreview> ExtractStems(string file, CancellationToken token, bool compressed = false, bool previewBoost = false, bool mixed = false, int mixedTrack = 0)
     {
         string directory = Path.Combine(Settings.DataDirectory, "preview-audio", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        string[] files = Enumerable.Range(0, 3).Select(i => Path.Combine(directory, $"stem-{i}.wav")).ToArray();
+        compressed &= !previewBoost;
+        string extension = compressed ? ".m4a" : ".wav";
+        string[] files = Enumerable.Range(0, mixed ? 1 : 3).Select(i => Path.Combine(directory, $"stem-{i}" + extension)).ToArray();
         var preview = new AudioPreview(directory, files);
         try
         {
             var args = new List<string> { "-hide_banner", "-loglevel", "error", "-nostdin", "-threads", "1", "-i", file };
-            for (int i = 0; i < 3; i++) args.AddRange(["-map", $"0:a:{i + 1}", "-vn", "-ac", "2", "-ar", "48000", "-c:a", "pcm_s16le", "-y", files[i]]);
+            for (int i = 0; i < files.Length; i++)
+            {
+                args.AddRange(["-map", $"0:a:{(mixed ? mixedTrack : i + 1)}", "-vn"]);
+                if (previewBoost) args.AddRange(["-af", "volume=2"]);
+                args.AddRange(compressed ? ["-c:a", "copy"] : ["-ac", "2", "-ar", "48000", "-c:a", previewBoost ? "pcm_f32le" : "pcm_s16le"]);
+                args.AddRange(["-y", files[i]]);
+            }
             var result = await Run("ffmpeg", args, token, 120);
             if (result.Exit != 0) throw new IOException("Separate preview audio could not be prepared.");
             return preview;
@@ -158,7 +167,7 @@ internal static class MediaTools
         catch { preview.Dispose(); throw; }
     }
 
-    public static async Task<ClipInfo> Trim(string original, string destination, double start, double end, ClipStamp expected, CancellationToken token, MixSettings? mix = null)
+    public static async Task<ClipInfo> Trim(string original, string destination, double start, double end, ClipStamp expected, CancellationToken token, MixSettings? mix = null, bool mixOnly = false)
     {
         if (start < 0 || end - start < 0.1 || !double.IsFinite(end)) throw new ArgumentException("Choose a trim range of at least 0.1 seconds.");
         if (ClipStamp.Read(original) != expected) throw new IOException("This clip changed since it was opened. Reopen it before trimming.");
@@ -172,22 +181,42 @@ internal static class MediaTools
         {
             // Precise boundaries need re-encoding; stream-copy trimming can start at an earlier keyframe.
             var common = new List<string> { "-hide_banner", "-loglevel", "error", "-xerror", "-nostdin", "-ss", F(start), "-i", original, "-t", F(duration) };
-            if (mix != null && (await Probe(original, token)).HasStems)
+            var source = await Probe(original, token);
+            if (mix != null && source.HasStems)
             {
                 string filter = $"[0:a:1]asplit=2[graw][gm];[0:a:2]asplit=2[draw][dm];[0:a:3]asplit=2[mraw][mm];[gm]volume={F(mix.GameGain)}[g];[dm]volume={F(mix.DiscordGain)}[d];[mm]volume={F(mix.MicrophoneGain)}[m];[g][d][m]amix=inputs=3:normalize=0,alimiter=limit=0.98:level=0:latency=1[out]";
-                common.AddRange(["-filter_complex", filter, "-map", "0:v:0", "-map", "[out]", "-map", "[graw]", "-map", "[draw]", "-map", "[mraw]"]);
+                if (mixOnly)
+                    filter = $"[0:a:1]volume={F(mix.GameGain)}[g];[0:a:2]volume={F(mix.DiscordGain)}[d];[0:a:3]volume={F(mix.MicrophoneGain)}[m];[g][d][m]amix=inputs=3:normalize=0,alimiter=limit=0.98:level=0:latency=1[out]";
+                common.AddRange(["-filter_complex", filter, "-map", "0:v:0", "-map", "[out]", "-map", mixOnly ? "0:a:1" : "[graw]", "-map", mixOnly ? "0:a:2" : "[draw]", "-map", mixOnly ? "0:a:3" : "[mraw]"]);
                 string[] names = ["ClipIt Mix", "Game", "Discord", "Microphone"];
                 for (int i = 0; i < names.Length; i++) common.AddRange([$"-metadata:s:a:{i}", "handler_name=" + names[i], $"-metadata:s:a:{i}", "name=" + names[i]]);
             }
             else
             {
-                common.AddRange(["-map", "0:v:0", "-map", "0:a?"]);
-                if (mix != null) common.AddRange(["-af", "volume=" + F(mix.GameGain)]);
+                if (mix != null && source.AudioTracks > 0)
+                {
+                    int raw = source.OriginalMixTrack ?? 0;
+                    common.AddRange(["-filter_complex", $"[0:a:{raw}]volume={F(mix.GameGain)}[out]", "-map", "0:v:0", "-map", "[out]"]);
+                    for (int i = 1; i < source.AudioTracks; i++) common.AddRange(["-map", $"0:a:{i}"]);
+                    if (source.OriginalMixTrack == null)
+                    {
+                        common.AddRange(["-map", "0:a:0", $"-metadata:s:a:{source.AudioTracks}", "handler_name=ClipIt Original Mix", $"-metadata:s:a:{source.AudioTracks}", "name=ClipIt Original Mix"]);
+                    }
+                }
+                else common.AddRange(["-map", "0:v:0", "-map", "0:a?"]);
             }
             common.AddRange(["-map_metadata", "0"]);
             if (mix != null) common.AddRange(["-metadata", "comment=ClipItMix:" + JsonSerializer.Serialize(mix)]);
             string[] tail = ["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-metadata", "encoder=ClipIt", "-y", temp];
-            var result = await Run("ffmpeg", common.Concat(["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "20", "-b:v", "0"]).Concat(tail), token, 900);
+            // Autosaves only encode the audible mix; keep raw source tracks bit-for-bit intact.
+            if (mixOnly && mix != null && source.AudioTracks > 0)
+            {
+                int tracks = source.HasStems ? 4 : source.AudioTracks + (source.OriginalMixTrack == null ? 1 : 0);
+                var copySources = new List<string>();
+                for (int i = 1; i < tracks; i++) copySources.AddRange([$"-c:a:{i}", "copy"]);
+                tail = tail.Take(tail.Length - 2).Concat(copySources).Concat(tail.TakeLast(2)).ToArray();
+            }
+            var result = await Run("ffmpeg", common.Concat(mixOnly ? ["-c:v", "copy"] : new[] { "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "20", "-b:v", "0" }).Concat(tail), token, 900);
             if (result.Exit != 0)
             {
                 token.ThrowIfCancellationRequested();

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -7,6 +8,36 @@ namespace ClipIt;
 
 internal static class ClipFiles
 {
+    internal sealed record PlaybackSettings(ClipStamp Stamp, MixSettings Mix, double Master, bool MasterEnabled = true);
+
+    private static string PlaybackPath(string path) => Path.Combine(Settings.DataDirectory, "playback", Path.GetFileName(FavoritePath(path)));
+
+    internal static PlaybackSettings? ReadPlayback(string path)
+    {
+        try
+        {
+            string marker = PlaybackPath(path);
+            if (!File.Exists(marker)) return null;
+            var saved = JsonSerializer.Deserialize<PlaybackSettings>(File.ReadAllText(marker));
+            return saved != null && saved.Stamp == ClipStamp.Read(path) ? saved : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        { Log.Write("Could not read playback settings: " + ex.Message); return null; }
+    }
+
+    internal static void SavePlayback(string path, ClipStamp stamp, MixSettings mix, double master, bool masterEnabled = true)
+    {
+        string marker = PlaybackPath(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+        string temporary = marker + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(new PlaybackSettings(stamp, mix, master, masterEnabled)));
+            File.Move(temporary, marker, overwrite: true);
+        }
+        finally { RemoveMarker(temporary); }
+    }
+
     public static string SaveName(string application) => $"{AppTargets.FolderName(application)} {DateTime.Now:yyyy-MM-dd HH-mm-ss}-{Guid.NewGuid().ToString("N")[..6]}";
 
     public static bool IsInLibrary(string path, string library)
@@ -103,7 +134,7 @@ internal static class ClipFiles
         string gameMarker = LabelPath(destination, "game");
         string favoriteMarker = FavoritePath(destination);
         bool samePath = string.Equals(path, destination, StringComparison.OrdinalIgnoreCase);
-        bool createdTitle = false, createdGame = false, createdFavorite = false;
+        bool createdTitle = false, createdGame = false, createdFavorite = false, createdPlayback = false;
         try
         {
             if (!File.Exists(titleMarker))
@@ -121,6 +152,12 @@ internal static class ClipFiles
                 File.Copy(oldFavoriteMarker, favoriteMarker);
                 createdFavorite = true;
             }
+            if (!samePath && File.Exists(PlaybackPath(path)))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(PlaybackPath(destination))!);
+                File.Copy(PlaybackPath(path), PlaybackPath(destination));
+                createdPlayback = true;
+            }
             File.Move(path, destination, overwrite: false);
         }
         catch
@@ -128,6 +165,7 @@ internal static class ClipFiles
             if (createdTitle) RemoveMarker(titleMarker);
             if (createdGame) RemoveMarker(gameMarker);
             if (createdFavorite) RemoveMarker(favoriteMarker);
+            if (createdPlayback) RemoveMarker(PlaybackPath(destination));
             throw;
         }
         if (!samePath) RemoveLabels(path);
@@ -138,6 +176,7 @@ internal static class ClipFiles
         RemoveMarker(LabelPath(path, "title"));
         RemoveMarker(LabelPath(path, "game"));
         RemoveMarker(FavoritePath(path));
+        RemoveMarker(PlaybackPath(path));
     }
 
     private static void RemoveMarker(string marker)

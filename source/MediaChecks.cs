@@ -81,6 +81,14 @@ internal static class MediaChecks
             Require(levels[0] > .03 && levels[2] > .05 && levels[1] < levels[0] * .01 && raw[1] > .08, "Discord mute removes its tone from playback mix while retaining its raw source");
             var restored = await MediaTools.Trim(separate, separate, 0, 3, ClipStamp.Read(separate), CancellationToken.None, new MixSettings());
             Require(restored.HasStems && (await Tones(0))[1] > .08, "Muted Discord can be restored by a subsequent edit");
+            var unity = await Tones(0);
+            await MediaTools.Trim(separate, separate, 0, 3, ClipStamp.Read(separate), CancellationToken.None, new MixSettings(Game: 2), mixOnly: true);
+            var boosted = await Tones(0);
+            Require(boosted[0] > unity[0] * 1.8 && (await MediaTools.Probe(separate, CancellationToken.None)).Mix.Game == 2, "Boosted source is louder in the saved mix and its gain survives reopening");
+            using (var preview = await MediaTools.ExtractStems(separate, CancellationToken.None, previewBoost: true))
+                Require(preview.Files.All(f => new FileInfo(f).Length > 1000), "Boost-ready floating-point preview sources decode");
+            using (var preview = await MediaTools.ExtractStems(original, CancellationToken.None, previewBoost: true, mixed: true))
+                Require(preview.Files.Length == 1 && new FileInfo(preview.Files[0]).Length > 1000, "Older mixed clips have a boost-ready preview track");
             Require(AppTargets.FolderName("CON") == "_CON" && AppTargets.FolderName("a:b/c") == "a-b-c", "Application folder names are safe Windows names");
             Require(!Directory.EnumerateFiles(folder, ".clipit-render-*").Any(), "No temporary renders remain");
             File.WriteAllText(Path.Combine(root, "media-check-results.json"), JsonSerializer.Serialize(new { Success = true, Folder = folder, Checks = checks }, new JsonSerializerOptions { WriteIndented = true }));

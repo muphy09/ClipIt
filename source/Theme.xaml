@@ -206,7 +206,7 @@
   <Style TargetType="Slider">
     <Setter Property="Height" Value="24"/><Setter Property="VerticalAlignment" Value="Center"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider">
-      <Grid><Border Height="4" Background="#293C57" CornerRadius="2" VerticalAlignment="Center"/>
+      <Grid Background="Transparent"><Border Height="4" Background="#293C57" CornerRadius="2" VerticalAlignment="Center"/>
         <Track x:Name="PART_Track">
           <Track.DecreaseRepeatButton><RepeatButton Command="Slider.DecreaseLarge"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="4" Background="#4D8DFF" VerticalAlignment="Center" CornerRadius="2"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton>
           <Track.Thumb><Thumb Width="12" Height="18"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="#9AC3FF" CornerRadius="4"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>

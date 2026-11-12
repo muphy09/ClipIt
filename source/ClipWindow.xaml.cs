@@ -68,6 +68,7 @@ public partial class ClipWindow : Wpf.Window
         OverlayToggle.Checked += GeneralSetting_Changed; OverlayToggle.Unchecked += GeneralSetting_Changed;
         RamBufferToggle.Checked += GeneralSetting_Changed; RamBufferToggle.Unchecked += GeneralSetting_Changed;
         recorder = new(settings);
+        InitializeRecording();
         FolderBox.Text = settings.Folder;
         PortalFolderBox.Text = settings.PortalFolder;
         ClearPortalButton.IsEnabled = PortalFolderBox.Text.Length > 0;
@@ -84,7 +85,7 @@ public partial class ClipWindow : Wpf.Window
         MonitorBox.SelectedIndex = Math.Max(0, MonitorBox.Items.Cast<DisplayChoice>().ToList().FindIndex(s => s.Id == settings.Monitor));
         RefreshResolutions(settings.Height);
         FpsBox.Items.Add("30 FPS"); FpsBox.Items.Add("60 FPS"); FpsBox.SelectedIndex = settings.Fps == 30 ? 0 : 1;
-        for (int seconds = 30; seconds <= 300; seconds += 30) ReplayLengthBox.Items.Add(ReplayTime(seconds));
+        for (int seconds = 30; seconds <= 600; seconds += 30) ReplayLengthBox.Items.Add(ReplayTime(seconds));
         ReplayLengthBox.SelectedIndex = settings.ReplaySeconds / 30 - 1;
         ReplayLengthLabel.Text = "Replay Length: " + ReplayTime(settings.ReplaySeconds);
         BufferTime.Text = $"00:00 / {settings.ReplaySeconds / 60:00}:{settings.ReplaySeconds % 60:00}";
@@ -122,7 +123,8 @@ public partial class ClipWindow : Wpf.Window
         menu.Items.Add("Save clip", null, (_, _) => recorder.Save());
         menu.Items.Add("Your Clips", null, (_, _) => ShowLibrary());
         menu.Items.Add("Open clips folder", null, (_, _) => OpenFolder());
-        trayPause = new Forms.ToolStripMenuItem("Pause recording", null, (_, _) => recorder.Toggle());
+        menu.Items.Add("Start / stop recording", null, (_, _) => ToggleRecording());
+        trayPause = new Forms.ToolStripMenuItem("Pause Instant Replay", null, (_, _) => recorder.Toggle());
         menu.Items.Add(trayPause);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("Quit ClipIt", null, (_, _) => Quit());
@@ -145,6 +147,8 @@ public partial class ClipWindow : Wpf.Window
             if (!registered) Notice($"{settings.Shortcut} is already in use. Choose a different capture shortcut.", true, NoticeArea.Location);
             libraryRegistered = Win32.RegisterHotKey(handle, libraryHotkeyId, settings.LibraryModifiers | 0x4000, settings.LibraryKey);
             if (!libraryRegistered) Notice($"Your Clips shortcut {settings.LibraryShortcut} is already in use. Choose a different Your Clips shortcut.", true, NoticeArea.Location);
+            recordingRegistered = Win32.RegisterHotKey(handle, recordingHotkeyId, settings.Recording.Modifiers | 0x4000, settings.Recording.Key);
+            if (!recordingRegistered) RecordingStatus.Text = "The recording shortcut is already in use. Choose another shortcut.";
             timer.Start();
         };
         SystemEvents.PowerModeChanged += PowerChanged;
@@ -170,11 +174,11 @@ public partial class ClipWindow : Wpf.Window
         StatusTitle.Text = RecordingMessage(recorder.Enabled, active, recorder.Seconds, settings.ReplaySeconds);
         ReplayLengthLabel.Text = "Replay Length: " + ReplayTime(settings.ReplaySeconds);
         StatusTitle.ToolTip = recorder.Status;
-        recordingOverlay.Update(settings.Overlay, active, settings.Monitor);
+        TickRecording();
         SaveClipButton.IsEnabled = active && !recorder.Saving;
         SaveButtonText.Text = recorder.Saving ? "Saving…" : "Save clip";
-        PauseButton.Content = recorder.Enabled ? "Pause recording" : "Resume recording";
-        trayPause.Text = recorder.Enabled ? "Pause recording" : "Resume recording";
+        PauseButton.Content = recorder.Enabled ? "Pause Instant Replay" : "Resume Instant Replay";
+        trayPause.Text = recorder.Enabled ? "Pause Instant Replay" : "Resume Instant Replay";
         BufferDescription.Text = active ? (recorder.Seconds >= settings.ReplaySeconds ? "Full replay buffer  ·  " + settings.Shortcut.Replace("+", " + ") : "Building your replay buffer") : recorder.Enabled ? "Waiting for capture" : "Replay buffer paused";
         BufferTime.Text = $"{recorder.Seconds / 60:00}:{recorder.Seconds % 60:00} / {settings.ReplaySeconds / 60:00}:{settings.ReplaySeconds % 60:00}";
         UpdateBuffer();
@@ -228,6 +232,7 @@ public partial class ClipWindow : Wpf.Window
             case "application": GameCaptureStatus.Text = message.Text; break;
             case "microphones":
                 var devices = JsonSerializer.Deserialize<List<AudioDevice>>(message.Text) ?? [];
+                UpdateRecordingDevices(devices);
                 string selected = (MicrophoneBox.SelectedItem as AudioDevice)?.Id ?? settings.MicrophoneDevice;
                 if (devices.All(d => d.Id != selected)) devices.Add(new(selected, "Unavailable microphone · saved selection"));
                 bool wasPopulating = populating; populating = true;
@@ -361,7 +366,8 @@ public partial class ClipWindow : Wpf.Window
             if (changedKey) { if (registered) Win32.UnregisterHotKey(handle, hotkeyId); hotkeyId = newId; registered = true; }
             settings = updated; recorder.Settings = updated; recorder.Restart();
             _ = UpdateBufferDriveWarning();
-            library?.SetFolder(updated.Folder, updated.PortalFolder);
+            UpdateLibraryFolder();
+            RefreshRecordingCaptureDefaults();
             populating = true; FolderBox.Text = settings.Folder; populating = false;
             captureBaseline = CaptureSelection(); MarkDirty(); ClearNotices();
         }
@@ -376,23 +382,38 @@ public partial class ClipWindow : Wpf.Window
         if (pressed == Key.Escape) { ShowShortcut(); ClearNotice(NoticeArea.Location); Keyboard.ClearFocus(); return; }
         if (pressed is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) return;
         var mods = Keyboard.Modifiers;
-        if (!mods.HasFlag(ModifierKeys.Control) && !mods.HasFlag(ModifierKeys.Alt)) { Notice("Include Ctrl or Alt in your shortcut.", true, NoticeArea.Location); return; }
+        bool forRecording = ReferenceEquals(sender, RecordingShortcutBox);
+        if (!mods.HasFlag(ModifierKeys.Control) && !mods.HasFlag(ModifierKeys.Alt))
+        {
+            if (forRecording) RecordingStatus.Text = "Include Ctrl or Alt in your shortcut.";
+            else Notice("Include Ctrl or Alt in your shortcut.", true, NoticeArea.Location);
+            return;
+        }
         uint enteredModifiers = (mods.HasFlag(ModifierKeys.Control) ? 2u : 0) | (mods.HasFlag(ModifierKeys.Alt) ? 1u : 0) | (mods.HasFlag(ModifierKeys.Shift) ? 4u : 0) | (mods.HasFlag(ModifierKeys.Windows) ? 8u : 0);
-        SaveShortcutCore(enteredModifiers, (uint)KeyInterop.VirtualKeyFromKey(pressed), ReferenceEquals(sender, LibraryShortcutBox));
+        SaveShortcutCore(enteredModifiers, (uint)KeyInterop.VirtualKeyFromKey(pressed), ReferenceEquals(sender, LibraryShortcutBox), forRecording);
     }
     internal bool SaveShortcut(uint enteredModifiers, uint enteredKey) => SaveShortcutCore(enteredModifiers, enteredKey, false);
     internal bool SaveLibraryShortcut(uint enteredModifiers, uint enteredKey) => SaveShortcutCore(enteredModifiers, enteredKey, true);
-    private bool SaveShortcutCore(uint enteredModifiers, uint enteredKey, bool forLibrary)
+    private bool SaveShortcutCore(uint enteredModifiers, uint enteredKey, bool forLibrary, bool forRecording = false)
     {
-        int previousId = forLibrary ? libraryHotkeyId : hotkeyId;
-        bool wasRegistered = forLibrary ? libraryRegistered : registered;
-        int newId = forLibrary ? (previousId == 3 ? 4 : 3) : (previousId == 1 ? 2 : 1);
-        bool changed = enteredModifiers != (forLibrary ? settings.LibraryModifiers : settings.Modifiers) || enteredKey != (forLibrary ? settings.LibraryKey : settings.Key) || !wasRegistered;
+        int previousId = forRecording ? recordingHotkeyId : forLibrary ? libraryHotkeyId : hotkeyId;
+        bool wasRegistered = forRecording ? recordingRegistered : forLibrary ? libraryRegistered : registered;
+        int newId = previousId % 2 == 0 ? previousId - 1 : previousId + 1;
+        bool changed = enteredModifiers != (forRecording ? settings.Recording.Modifiers : forLibrary ? settings.LibraryModifiers : settings.Modifiers)
+            || enteredKey != (forRecording ? settings.Recording.Key : forLibrary ? settings.LibraryKey : settings.Key) || !wasRegistered;
         try
         {
-            var updated = (forLibrary ? settings with { LibraryModifiers = enteredModifiers, LibraryKey = enteredKey } : settings with { Modifiers = enteredModifiers, Key = enteredKey }).Validated();
+            var updated = (forRecording ? settings with { Recording = settings.Recording with { Modifiers = enteredModifiers, Key = enteredKey } }
+                : forLibrary ? settings with { LibraryModifiers = enteredModifiers, LibraryKey = enteredKey }
+                : settings with { Modifiers = enteredModifiers, Key = enteredKey }).Validated();
             if (updated.Key == updated.LibraryKey && updated.Modifiers == updated.LibraryModifiers)
                 throw new InvalidOperationException("Capture and Your Clips must use different shortcuts.");
+            if ((updated.Recording.Key, updated.Recording.Modifiers) == (updated.Key, updated.Modifiers)
+                || (updated.Recording.Key, updated.Recording.Modifiers) == (updated.LibraryKey, updated.LibraryModifiers))
+            {
+                if (forRecording || recordingRegistered)
+                    throw new InvalidOperationException("Recording must use a different shortcut from Capture and Your Clips.");
+            }
             if (changed && !Win32.RegisterHotKey(handle, newId, enteredModifiers | 0x4000, enteredKey))
                 throw new InvalidOperationException("That shortcut is already in use. Your previous shortcut is still active.");
             try { updated.Save(); }
@@ -400,15 +421,23 @@ public partial class ClipWindow : Wpf.Window
             if (changed)
             {
                 if (wasRegistered) Win32.UnregisterHotKey(handle, previousId);
-                if (forLibrary) { libraryHotkeyId = newId; libraryRegistered = true; }
+                if (forRecording) { recordingHotkeyId = newId; recordingRegistered = true; }
+                else if (forLibrary) { libraryHotkeyId = newId; libraryRegistered = true; }
                 else { hotkeyId = newId; registered = true; }
             }
             settings = updated; recorder.Settings = updated; modifiers = updated.Modifiers; key = updated.Key;
             ShowShortcut();
+            if (forRecording && !session.Busy) RecordingStatus.Text = "Recording shortcut saved.";
             ClearNotice(NoticeArea.Location);
             return true;
         }
-        catch (Exception ex) { Notice(ex.Message, true, NoticeArea.Location); ShowShortcut(); return false; }
+        catch (Exception ex)
+        {
+            if (forRecording) RecordingStatus.Text = ex.Message;
+            else Notice(ex.Message, true, NoticeArea.Location);
+            ShowShortcut();
+            return false;
+        }
     }
     private void ShowShortcut()
     {
@@ -416,6 +445,8 @@ public partial class ClipWindow : Wpf.Window
         ShortcutBox.Text = settings.Shortcut.Replace("+", " + ");
         LibraryShortcutBox.FontStyle = Wpf.FontStyles.Normal;
         LibraryShortcutBox.Text = settings.LibraryShortcut.Replace("+", " + ");
+        RecordingShortcutBox.FontStyle = Wpf.FontStyles.Normal;
+        RecordingShortcutBox.Text = settings.RecordingShortcut.Replace("+", " + ");
     }
     private void BeginShortcutInput(System.Windows.Controls.TextBox box)
     {
@@ -463,11 +494,13 @@ public partial class ClipWindow : Wpf.Window
         settings = updated; recorder.Settings = updated;
         PortalFolderBox.Text = path;
         ClearPortalButton.IsEnabled = path.Length > 0;
-        library?.SetFolder(updated.Folder, updated.PortalFolder);
+        UpdateLibraryFolder();
         GeneralSettingsStatus.Text = path.Length > 0 ? "Portal Clips folder linked." : "Portal Clips folder link cleared.";
     }
     private void Library_Click(object sender, Wpf.RoutedEventArgs e) => ShowLibrary();
-    private void ShowLibrary()
+    private void Favorites_Click(object sender, Wpf.RoutedEventArgs e) => ShowLibrary(favorites: true);
+    private void UpdateLibraryFolder() => library?.SetFolder(settings.Folder, settings.PortalFolder, settings.RecordingsPath);
+    private void ShowLibrary(bool favorites = false)
     {
         ClearNotices();
         ShowSettings();
@@ -478,13 +511,11 @@ public partial class ClipWindow : Wpf.Window
             library.GameViewPreferenceChanged += SaveGameView;
             LibraryHost.Child = library;
         }
-        library.SetFolder(settings.Folder, settings.PortalFolder);
-        library.ShowDashboard();
-        CapturePanel.Visibility = Wpf.Visibility.Collapsed; LibraryHost.Visibility = Wpf.Visibility.Visible;
-        GeneralSettingsPanel.Visibility = Wpf.Visibility.Collapsed;
-        SettingsNav.Background = SettingsNav.BorderBrush = Media.Brushes.Transparent;
-        LibraryNav.Background = Brush("#14294A"); LibraryNav.BorderBrush = Brush("#244876");
-        CaptureNav.Background = Media.Brushes.Transparent; CaptureNav.BorderBrush = Media.Brushes.Transparent;
+        UpdateLibraryFolder();
+        if (favorites) library.ShowFavorites();
+        else if (library.ShowingFavorites) library.ShowRecent();
+        else library.ShowDashboard();
+        SelectPage(LibraryHost, favorites ? FavoritesNav : LibraryNav);
     }
     private void SaveGameView(bool tiles)
     {
@@ -492,13 +523,18 @@ public partial class ClipWindow : Wpf.Window
         updated.Save();
         settings = updated; recorder.Settings = updated;
     }
-    private void Capture_Click(object sender, Wpf.RoutedEventArgs e)
+    private void Capture_Click(object sender, Wpf.RoutedEventArgs e) => SelectPage(CapturePanel, CaptureNav);
+
+    private void SelectPage(Wpf.FrameworkElement page, System.Windows.Controls.Button navigation)
     {
-        library?.PausePlayback(); LibraryHost.Visibility = Wpf.Visibility.Collapsed; CapturePanel.Visibility = Wpf.Visibility.Visible;
-        GeneralSettingsPanel.Visibility = Wpf.Visibility.Collapsed;
-        SettingsNav.Background = SettingsNav.BorderBrush = Media.Brushes.Transparent;
-        CaptureNav.Background = Brush("#14294A"); CaptureNav.BorderBrush = Brush("#244876");
-        LibraryNav.Background = Media.Brushes.Transparent; LibraryNav.BorderBrush = Media.Brushes.Transparent;
+        if (page != LibraryHost) library?.PausePlayback();
+        foreach (var panel in new Wpf.FrameworkElement[] { CapturePanel, RecordingPanel, LibraryHost, GeneralSettingsPanel })
+            panel.Visibility = panel == page ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
+        foreach (var button in new[] { CaptureNav, RecordingNav, LibraryNav, FavoritesNav, SettingsNav })
+        {
+            button.Background = button == navigation ? Brush("#14294A") : Media.Brushes.Transparent;
+            button.BorderBrush = button == navigation ? Brush("#244876") : Media.Brushes.Transparent;
+        }
     }
     private void PatchNotes_Click(object sender, Wpf.RoutedEventArgs e)
     {
@@ -515,11 +551,7 @@ public partial class ClipWindow : Wpf.Window
     private void Settings_Click(object sender, Wpf.RoutedEventArgs e)
     {
         ClearNotices();
-        library?.PausePlayback();
-        CapturePanel.Visibility = LibraryHost.Visibility = Wpf.Visibility.Collapsed;
-        GeneralSettingsPanel.Visibility = Wpf.Visibility.Visible;
-        SettingsNav.Background = Brush("#14294A"); SettingsNav.BorderBrush = Brush("#244876");
-        CaptureNav.Background = CaptureNav.BorderBrush = LibraryNav.Background = LibraryNav.BorderBrush = Media.Brushes.Transparent;
+        SelectPage(GeneralSettingsPanel, SettingsNav);
     }
     private void RefreshMicrophones_Click(object sender, Wpf.RoutedEventArgs e) => recorder.RefreshMicrophones();
     private void RefreshApps_Click(object sender, Wpf.RoutedEventArgs e) => RefreshGameApps();
@@ -600,6 +632,11 @@ public partial class ClipWindow : Wpf.Window
             if (!capturingShortcut) { ShowLibrary(); library!.ShowRecent(); }
             handled = true;
         }
+        else if (message == 0x0312 && (int)wParam == recordingHotkeyId)
+        {
+            if (!capturingShortcut) ToggleRecording();
+            handled = true;
+        }
         return 0;
     }
     private bool cleaned;
@@ -609,10 +646,11 @@ public partial class ClipWindow : Wpf.Window
         updates.Changed -= UpdateStatus; updates.Dispose();
         timer.Stop(); if (registered) Win32.UnregisterHotKey(handle, hotkeyId);
         if (libraryRegistered) Win32.UnregisterHotKey(handle, libraryHotkeyId);
+        if (recordingRegistered) Win32.UnregisterHotKey(handle, recordingHotkeyId);
         source?.RemoveHook(WindowMessage);
         source?.RemoveHook(Win32.FitMaximizedWindow);
         SystemEvents.PowerModeChanged -= PowerChanged; SystemEvents.DisplaySettingsChanged -= DisplayChanged;
-        recorder.Dispose(); tray.Visible = false; var icon = tray.Icon; var menu = tray.ContextMenuStrip; tray.Dispose(); icon?.Dispose(); menu?.Dispose();
+        session.Dispose(); recorder.Dispose(); tray.Visible = false; var icon = tray.Icon; var menu = tray.ContextMenuStrip; tray.Dispose(); icon?.Dispose(); menu?.Dispose();
         library?.Dispose();
         recordingOverlay.Close(); captureChime.Dispose();
     }

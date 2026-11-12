@@ -18,6 +18,7 @@ internal static class AppTargets
     [DllImport("user32")] private static extern nint GetForegroundWindow();
     [DllImport("user32")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32")] private static extern bool GetWindowRect(nint window, out Rect rectangle);
+    [DllImport("user32")] private static extern bool GetClientRect(nint window, out Rect rectangle);
     [DllImport("user32")] private static extern uint GetWindowThreadProcessId(nint window, out uint pid);
     [DllImport("user32", CharSet=CharSet.Unicode)] private static extern int GetWindowText(nint window, StringBuilder text, int length);
     [DllImport("user32", CharSet=CharSet.Unicode)] private static extern int GetClassName(nint window, StringBuilder text, int length);
@@ -58,6 +59,34 @@ internal static class AppTargets
         }, 0);
         return list.OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
+    internal static nint FindWindow(string token)
+    {
+        nint match = 0;
+        EnumWindows((window, _) =>
+        {
+            if (!IsWindowVisible(window) || Read(window)?.Token != token) return true;
+            match = window;
+            return false;
+        }, 0);
+        return match;
+    }
+    internal static List<CaptureApp> RecordingWindows()
+    {
+        var windows = new List<CaptureApp>();
+        EnumWindows((window, _) =>
+        {
+            if (!IsWindowVisible(window) || Read(window) is not { } app || app.Executable.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (windows.Any(existing => existing.Token == app.Token)) return true;
+            string title = app.Token.Split(':', 2)[0].Replace("#3A", ":").Replace("#22", "#");
+            windows.Add(app with { Name = $"{app.Name} · {title}" });
+            return true;
+        }, 0);
+        return windows.OrderBy(app => app.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+    internal static bool HasWindow(nint window) => GetWindowThreadProcessId(window, out _) != 0;
+    internal static (int Width, int Height) WindowSize(nint window) =>
+        GetClientRect(window, out var bounds) ? (bounds.Right, bounds.Bottom) : (0, 0);
     public static CaptureApp? FullscreenGame(string monitor = "")
     {
         var window = GetForegroundWindow();

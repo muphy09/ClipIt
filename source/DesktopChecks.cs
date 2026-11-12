@@ -12,7 +12,7 @@ namespace ClipIt;
 internal static class DesktopChecks
 {
     // This check runs only on explicit request, with disposable settings/media and a temporary registry key.
-    internal static int Run(string root, bool recordingChecks = true)
+    internal static int Run(string root, bool recordingChecks = true, bool recordingOnly = false)
     {
         root = Path.GetFullPath(root);
         Directory.CreateDirectory(root);
@@ -21,6 +21,7 @@ internal static class DesktopChecks
         var results = new List<string>();
         var app = new Wpf.Application { ShutdownMode = Wpf.ShutdownMode.OnExplicitShutdown };
         ClipWindow? window = null;
+        Wpf.Window? overlayBackground = null;
         int exit = 1;
         void Require(bool condition, string name) { if (!condition) throw new Exception(name); results.Add(name); }
         app.Startup += async (_, _) =>
@@ -30,6 +31,7 @@ internal static class DesktopChecks
                 var initial = Settings.Load();
                 Require(initial.Modifiers == 1 && initial.Key == (uint)Keys.B, "New profiles default to Alt+B");
                 Require(initial.LibraryModifiers == 5 && initial.LibraryKey == (uint)Keys.B, "Your Clips defaults to Alt+Shift+B for existing and new profiles");
+                Require(initial.RecordingShortcut == "Alt+V", "Recording defaults to Alt+V");
                 Require(ClipWindow.RecordingMessage(true, true, 20, 120) == "Replay buffer is building" && ClipWindow.RecordingMessage(true, false, 0, 120) == "Replay buffer is building", "Building and restarting capture show the requested buffer message");
                 Require(ClipWindow.RecordingMessage(false, false, 0, 120) == "Recording has been paused.", "Paused recording shows the requested message");
                 Require(ClipWindow.RecordingMessage(true, true, 120, 120) == "Recording is active. Last 2 minutes ready for capture." && ClipWindow.RecordingMessage(true, true, 30, 30) == "Recording is active. Last 30 seconds ready for capture." && ClipWindow.RecordingMessage(true, true, 90, 90) == "Recording is active. Last 1 minute 30 seconds ready for capture.", "Active status uses the selected length with correct minute and second units");
@@ -38,8 +40,8 @@ internal static class DesktopChecks
                 Require(CaptureQuality.Resolutions(900).SequenceEqual(new[] { 720, 900 }) && CaptureQuality.Resolutions(1440).Last() == 1440 && CaptureQuality.Resolutions(1080).All(h => h <= 1080), "Resolution options include the monitor maximum and exclude larger resolutions");
                 Require(CaptureQuality.RecommendedBitrate(1440, 60) > CaptureQuality.RecommendedBitrate(1080, 60) && CaptureQuality.RecommendedBitrate(1080, 60) > CaptureQuality.RecommendedBitrate(1080, 30), "Suggested bitrate increases with resolution and frame rate");
                 Require(initial.ReplaySeconds == 120, "Existing settings retain the two-minute default");
-                foreach (int seconds in Enumerable.Range(1, 10).Select(n => n * 30)) (initial with { ReplaySeconds = seconds }).Validated();
-                foreach (int seconds in new[] { 0, 29, 31, 301, 330 })
+                foreach (int seconds in Enumerable.Range(1, 20).Select(n => n * 30)) (initial with { ReplaySeconds = seconds }).Validated();
+                foreach (int seconds in new[] { 0, 29, 31, 601, 630 })
                 {
                     bool rejected = false;
                     try { (initial with { ReplaySeconds = seconds }).Validated(); } catch (ArgumentException) { rejected = true; }
@@ -49,6 +51,15 @@ internal static class DesktopChecks
                 var settings = initial with { Folder = Path.Combine(data, "clips"), ReplaySeconds = 30, GameWindow = ":ClipItWaiting:__clipit_no_game__.exe", StartWithWindows = true, StartMinimized = true, GameTileView = true, Modifiers = 3, Key = 118, LibraryModifiers = 3, LibraryKey = 121 };
                 settings.Save();
                 Require(Settings.Load() == settings, "Startup, minimized and overlay preferences survive reload");
+                if (recordingOnly)
+                {
+                    window = new ClipWindow { ShowInTaskbar = false };
+                    app.MainWindow = window;
+                    new WindowInteropHelper(window).EnsureHandle();
+                    await VerifyRecording(window);
+                    exit = 0;
+                    return;
+                }
                 string registryPath = @"Software\ClipIt.Checks." + Guid.NewGuid().ToString("N");
                 try
                 {
@@ -102,13 +113,13 @@ internal static class DesktopChecks
                 Require(((Wpf.FrameworkElement)window.FindName("LocationNotice")).Visibility == Wpf.Visibility.Visible, "Invalid save folder warns directly below Save Location");
                 folderBox.Text = savedFolder;
                 Require(((Wpf.FrameworkElement)window.FindName("LocationNotice")).Visibility == Wpf.Visibility.Collapsed && pendingBar.Visibility == Wpf.Visibility.Collapsed, "Restoring the save folder clears its warning and Apply bar");
-                Require(replayLength.Items.Count == 10 && (string)replayLength.Items[0] == "0:30" && (string)replayLength.Items[9] == "5:00" && replayLength.SelectedIndex == 0, "Replay dropdown offers every 30-second step and restores the saved selection");
+                Require(replayLength.Items.Count == 20 && (string)replayLength.Items[0] == "0:30" && (string)replayLength.Items[19] == "10:00" && replayLength.SelectedIndex == 0, "Replay dropdown offers every 30-second step and restores the saved selection");
                 string shortEstimate = estimate.Text;
-                replayLength.SelectedIndex = 9;
+                replayLength.SelectedIndex = 19;
                 Require(estimate.Text != shortEstimate && Settings.Load().ReplaySeconds == 30, "File-size estimate updates before applying the replay length");
                 bitrate.Text = "50";
                 ((C.Button)window.FindName("ApplyButton")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
-                Require(Settings.Load().ReplaySeconds == 300 && Settings.Load().Bitrate == 50000, "Apply saves the five-minute replay length and selected bitrate");
+                Require(Settings.Load().ReplaySeconds == 600 && Settings.Load().Bitrate == 50000, "Apply saves the ten-minute replay length and selected bitrate");
                 Require(pendingBar.Visibility == Wpf.Visibility.Collapsed, "Successful Apply hides the pending changes bar");
                 bitrate.Text = "24"; replayLength.SelectedIndex = 0;
                 ((C.Button)window.FindName("ApplyButton")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
@@ -206,7 +217,7 @@ internal static class DesktopChecks
                 Require(trimButton.Visibility != Wpf.Visibility.Visible, "Full-length selection hides Save trim");
                 var playbackOverlay = (C.Border)editor.FindName("PlaybackOverlay");
                 var playButton = (C.Button)editor.FindName("PlayButton");
-                var volumeSlider = (C.Slider)editor.FindName("VolumeSlider");
+                var speedBox = (C.ComboBox)editor.FindName("PlaybackSpeed");
                 void LayoutPlaybackOverlay()
                 {
                     playbackOverlay.Measure(new Wpf.Size(650, 180));
@@ -223,18 +234,64 @@ internal static class DesktopChecks
                     && Math.Abs(C.Canvas.GetLeft(endHandle) - (initialHandleLeft - 12)) < .01,
                     "The right trim handle follows the drag as Save trim appears without resizing the timeline");
                 Require(playbackOverlay.ActualHeight <= 58 && range.ActualWidth > 200
-                    && playButton.ActualWidth == 62 && volumeSlider.ActualWidth == 75 && trimButton.ActualHeight >= 28,
+                    && playButton.ActualWidth == 62 && speedBox.ActualWidth == 82 && trimButton.ActualHeight >= 28,
                     "The compact playback overlay fits one row with full-size controls and room to trim");
                 endHandle.RaiseEvent(new DragDeltaEventArgs(12, 0));
                 LayoutPlaybackOverlay();
                 Require(trimButton.Visibility != Wpf.Visibility.Visible && range.ActualWidth == timelineWidth
                     && Math.Abs(C.Canvas.GetLeft(endHandle) - initialHandleLeft) < .01,
                     "Restoring the full range hides Save trim without resizing the timeline");
+                Require(C.Grid.GetColumn(trimButton) == 3 && C.Grid.GetColumn(speedBox) == 4, "Save trim precedes playback speed in the overlay");
+                Require(((C.Button)editor.FindName("BackButton")).Width == 36 && Wpf.Automation.AutomationProperties.GetName((C.Button)editor.FindName("BackButton")) == "Back", "Editor uses a compact accessible back arrow");
+                var editorMessage = (C.TextBlock)editor.FindName("EditorMessage");
+                var headerStatus = (C.Grid)editor.FindName("HeaderStatus");
+                (double Mixer, double Preview, double Header) MeasureStatus()
+                {
+                    editor.Measure(new Wpf.Size(1100, 750));
+                    editor.Arrange(new Wpf.Rect(0, 0, 1100, 750));
+                    editor.UpdateLayout();
+                    return (((C.Border)editor.FindName("MixerCard")).ActualHeight, ((C.Grid)editor.FindName("PreviewSlot")).ActualHeight, ((C.Grid)editor.FindName("EditorHeader")).ActualHeight);
+                }
+                editorMessage.Text = "";
+                var emptyStatusSize = MeasureStatus();
+                foreach (string message in new[] { "Clip added to Favorites.", "Clip removed from Favorites.", "Preparing audio…", new string('W', 400) })
+                {
+                    editorMessage.Text = message;
+                    Require(MeasureStatus() == emptyStatusSize, "Header status leaves video and mixer dimensions unchanged: " + message[..Math.Min(message.Length, 40)]);
+                }
+                ((C.Button)editor.FindName("CancelButton")).Visibility = Wpf.Visibility.Visible;
+                ((C.Grid)editor.FindName("RenderProgress")).Visibility = Wpf.Visibility.Visible;
+                Require(MeasureStatus() == emptyStatusSize && editorMessage.Parent == headerStatus && C.Grid.GetColumn(headerStatus) == 2, "Messages, cancel action, and save progress occupy the fixed header space before Favorites");
+                ((C.Button)editor.FindName("CancelButton")).Visibility = Wpf.Visibility.Collapsed;
+                ((C.Grid)editor.FindName("RenderProgress")).Visibility = Wpf.Visibility.Collapsed;
+                editorMessage.Text = "";
+                typeof(ClipEditor).GetField("isFavorite", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(editor, true);
+                typeof(ClipEditor).GetMethod("UpdateFavoriteButton", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(editor, null);
+                var favoriteIcon = (System.Windows.Shapes.Path)editor.FindName("FavoriteIcon");
+                Require(((System.Windows.Media.SolidColorBrush)favoriteIcon.Fill).Color == System.Windows.Media.Color.FromRgb(245, 193, 76), "Selected favorite star is gold");
+                typeof(ClipEditor).GetField("isFavorite", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(editor, false);
+                typeof(ClipEditor).GetMethod("UpdateFavoriteButton", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(editor, null);
                 var game = (C.CheckBox)editor.FindName("GameEnabled");
                 var discord = (C.CheckBox)editor.FindName("DiscordEnabled");
                 var mic = (C.CheckBox)editor.FindName("MicrophoneEnabled");
                 var currentMix = typeof(ClipEditor).GetMethod("CurrentMix", BindingFlags.NonPublic | BindingFlags.Instance)!;
                 Require(game.IsChecked == true && discord.IsChecked == true && mic.IsChecked == true && (MixSettings)currentMix.Invoke(editor, null)! == new MixSettings(), "Editor audio switches start enabled with audible source gains");
+                var gameVolume = (C.Slider)editor.FindName("GameVolume");
+                Require(gameVolume.Value == gameVolume.Maximum / 2 && ((C.Slider)editor.FindName("VolumeSlider")).Value == .75, "Source midpoint preserves unity gain and master starts at 75 percent");
+                gameVolume.Value = 2;
+                Require(((MixSettings)currentMix.Invoke(editor, null)!).GameGain == 2, "Source volume can boost to twice its original gain");
+                gameVolume.Value = 1;
+                Require(speedBox.Items.Count == 8 && speedBox.SelectedIndex == 3, "Playback speed defaults to 1x with eight choices");
+                speedBox.SelectedIndex = 7;
+                Require(((C.MediaElement)editor.FindName("Player")).SpeedRatio == 2, "Speed selection updates video playback");
+                speedBox.SelectedIndex = 3;
+                typeof(ClipEditor).GetMethod("ShowOverlay", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(editor, null);
+                Require(playbackOverlay.Opacity == 0 && !playbackOverlay.IsHitTestVisible, "Windowed overlay stays hidden when the mouse is outside the preview");
+                var masterToggle = (C.CheckBox)editor.FindName("MasterEnabled");
+                masterToggle.IsChecked = false;
+                Require(game.IsChecked == false && discord.IsChecked == false && mic.IsChecked == false, "Master off switches every source off");
+                masterToggle.IsChecked = true;
+                Require(game.IsChecked == true && discord.IsChecked == true && mic.IsChecked == true && gameVolume.Value == 1, "Master on restores every source without changing volume levels");
                 discord.IsChecked = false;
                 var mix = (MixSettings)currentMix.Invoke(editor, null)!;
                 Require(mix.DiscordMuted && mix.DiscordGain == 0 && mix.GameGain == 1 && mix.MicrophoneGain == 1, "Turning off Discord mutes only that source");
@@ -284,7 +341,7 @@ internal static class DesktopChecks
                         && Directory.GetFiles(portalGame).Length == 1 && ClipFiles.IsFavorite(portalClip, libraryRoot),
                         "A Portal clip appears in Favorites without changing files in the linked folder");
                     await testLibrary.OpenClip(portalClip);
-                    Require((string)portalFavorite.Content == "Remove from Favorites", "Reopening a Portal clip restores its saved favorite status");
+                    Require((string)portalFavorite.ToolTip == "Remove from Favorites", "Reopening a Portal clip restores its saved favorite status");
                     portalFavorite.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
                     testLibrary.ShowRecent();
                     Require(!ClipFiles.IsFavorite(portalClip, libraryRoot) && File.Exists(portalClip), "Removing a Portal favorite leaves the source file in place");
@@ -320,9 +377,9 @@ internal static class DesktopChecks
                     await testLibrary.OpenClip(renamed);
                     var favoriteButton = (C.Button)clipEditor.FindName("FavoriteButton");
                     var editorActions = (C.StackPanel)favoriteButton.Parent;
-                    Require((string)favoriteButton.Content == "Mark as Favorite" && editorActions.Children[1] == clipEditor.FindName("ExplorerButton"), "Mark as Favorite sits before Open in Explorer");
+                    Require((string)favoriteButton.ToolTip == "Mark as Favorite" && editorActions.Children[1] == clipEditor.FindName("ExplorerButton"), "Mark as Favorite sits before Open in Explorer");
                     favoriteButton.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
-                    Require(File.Exists(renamed) && title.Text == "Overtime goal" && (string)favoriteButton.Content == "Remove from Favorites",
+                    Require(File.Exists(renamed) && title.Text == "Overtime goal" && (string)favoriteButton.ToolTip == "Remove from Favorites",
                         "Marking a clip keeps its file and title in place and allows removing the mark");
                     testLibrary.ShowDashboard();
                     for (int i = 0; i < 40 && ListTitle() != "Overtime goal"; i++) await Task.Delay(50);
@@ -385,7 +442,9 @@ internal static class DesktopChecks
                         Require(list.ItemsPanel == originalPanel && list.Items.Count == 3, "List view restores the original layout without leaving the game");
                         tiles.IsChecked = true;
                         testLibrary.ShowRecent();
-                        Require(!tiles.IsVisible && list.ItemsPanel == originalPanel, "Recent keeps its list layout and hides the game view switch");
+                        Require(tiles.IsVisible && list.ItemsPanel != originalPanel, "Recent shows the view switch and keeps the selected tile layout");
+                        ((C.RadioButton)testLibrary.FindName("ListViewButton")).IsChecked = true;
+                        Require(list.ItemsPanel == originalPanel, "Recent can switch back to the list");
                     }
                     finally { tileWindow.Close(); }
                 }
@@ -446,6 +505,11 @@ internal static class DesktopChecks
                         var preview = window.OwnedWindows.Cast<Wpf.Window>().Single(w => w.Title == "ClipIt · Fullscreen");
                         await preview.Dispatcher.InvokeAsync(preview.UpdateLayout, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
                         CheckBounds(preview, workArea, $"Fullscreen preview fits the work area of {screen.DeviceName}");
+                        Require(ReferenceEquals(playButton.Style, playButton.FindResource(typeof(C.Button)))
+                            && ReferenceEquals(fullscreenButton.Style, fullscreenButton.FindResource(typeof(C.Button)))
+                            && ReferenceEquals(speedBox.Style, speedBox.FindResource(typeof(C.ComboBox)))
+                            && ReferenceEquals(((C.ComboBoxItem)speedBox.Items[0]).Style, speedBox.FindResource(typeof(C.ComboBoxItem))),
+                            "Fullscreen retains the app theme for Play, speed, speed options, and Fullscreen");
                         fullscreenButton.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
                         window.WindowState = Wpf.WindowState.Normal;
                     }
@@ -460,6 +524,64 @@ internal static class DesktopChecks
                     window.Hide();
                 }
 
+                string audioFixture = Path.Combine(data, "preview-test.mp4");
+                var fixture = await MediaTools.Run("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=size=320x180:duration=2", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:v", "libx264", "-threads", "1", "-c:a", "aac", "-y", audioFixture], CancellationToken.None);
+                Require(fixture.Exit == 0, "Generated audio playback fixture");
+                using (var audioEditor = new ClipEditor())
+                {
+                    var openingAudio = audioEditor.Open(audioFixture, data);
+                    (double Mixer, double Preview) MeasureEditor()
+                    {
+                        audioEditor.Measure(new Wpf.Size(1100, 750));
+                        audioEditor.Arrange(new Wpf.Rect(0, 0, 1100, 750));
+                        audioEditor.UpdateLayout();
+                        return (((C.Border)audioEditor.FindName("MixerCard")).ActualHeight, ((C.Grid)audioEditor.FindName("PreviewSlot")).ActualHeight);
+                    }
+                    var loadingSize = MeasureEditor();
+                    while (!openingAudio.IsCompleted)
+                    {
+                        Require(((C.TextBlock)audioEditor.FindName("EditorMessage")).Parent == audioEditor.FindName("HeaderStatus"), "Loading messages occupy the stable header status area");
+                        await Task.WhenAny(openingAudio, Task.Delay(20));
+                    }
+                    await openingAudio;
+                    var readySize = MeasureEditor();
+                    Require(Math.Abs(loadingSize.Mixer - readySize.Mixer) < .01 && Math.Abs(loadingSize.Preview - readySize.Preview) < .01, "Audio preparation leaves mixer and video dimensions unchanged");
+                    var ready = (bool[])typeof(ClipEditor).GetField("stemReady", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(audioEditor)!;
+                    for (int i = 0; i < 50 && !ready[0]; i++) await Task.Delay(100);
+                    Require(ready[0], "Windows opens the floating-point boosted preview audio");
+                    var audioPlayers = (System.Windows.Media.MediaPlayer[])typeof(ClipEditor).GetField("stems", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(audioEditor)!;
+                    Require(Math.Abs(audioPlayers[0].Volume - .375) < .001, "Preview compensates preamplification to preserve original midpoint loudness");
+                    var originalBytes = File.ReadAllBytes(audioFixture);
+                    var originalPreview = typeof(ClipEditor).GetField("audioPreview", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(audioEditor);
+                    ((C.Slider)audioEditor.FindName("GameVolume")).Value = 2;
+                    Require(Math.Abs(audioPlayers[0].Volume - .75) < .001, "Raising a source above midpoint increases preview loudness");
+                    ((C.ComboBox)audioEditor.FindName("PlaybackSpeed")).SelectedIndex = 1;
+                    Require(audioPlayers.All(p => p.SpeedRatio == .5), "Playback speed updates every audio source together");
+                    ((TrimRange)audioEditor.FindName("Range")).SetRange(.25, 1.5);
+                    await Task.Delay(900);
+                    Require(!audioEditor.Busy && ClipFiles.ReadPlayback(audioFixture)?.Mix.Game == 2 && originalBytes.SequenceEqual(File.ReadAllBytes(audioFixture)), "Volume changes persist without rewriting the video or blocking playback");
+                    Require(ReferenceEquals(originalPreview, typeof(ClipEditor).GetField("audioPreview", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(audioEditor)) && ready[0], "Slider adjustments keep the existing audio preview loaded");
+                    Require(audioEditor.FindName("SaveMixButton") == null && ((TrimRange)audioEditor.FindName("Range")).Start == .25 && ((C.ComboBox)audioEditor.FindName("PlaybackSpeed")).SelectedIndex == 1, "Live mixing preserves pending trim and playback speed");
+                    ((C.Slider)audioEditor.FindName("VolumeSlider")).Value = .6;
+                    audioEditor.CloseMedia();
+                    await audioEditor.Open(audioFixture, data);
+                    Require(((C.Slider)audioEditor.FindName("GameVolume")).Value == 2 && ((C.Slider)audioEditor.FindName("VolumeSlider")).Value == .6, "Reopening restores automatically saved source and master volumes");
+                    ((C.CheckBox)audioEditor.FindName("MasterEnabled")).IsChecked = false;
+                    Require(audioPlayers.All(p => p.Volume == 0) && ClipFiles.ReadPlayback(audioFixture)?.MasterEnabled == false, "Master mute silences all preview players and saves its state");
+                    audioEditor.CloseMedia();
+                    await audioEditor.Open(audioFixture, data);
+                    Require(((C.CheckBox)audioEditor.FindName("MasterEnabled")).IsChecked == false && ((C.CheckBox)audioEditor.FindName("GameEnabled")).IsChecked == false, "Master and source mute states survive reopening");
+                    ((C.CheckBox)audioEditor.FindName("MasterEnabled")).IsChecked = true;
+                    audioEditor.CloseMedia();
+                    string renamedAudio = Path.Combine(data, "renamed-preview.mp4");
+                    ClipFiles.Rename(audioFixture, renamedAudio);
+                    Require(ClipFiles.ReadPlayback(renamedAudio)?.Mix.Game == 2, "Renaming a clip retains its saved playback mix");
+                    ClipFiles.RemoveLabels(renamedAudio);
+                    Require(ClipFiles.ReadPlayback(renamedAudio) == null, "Removing clip metadata clears saved playback settings");
+
+
+
+                }
                 if (!recordingChecks) { exit = 0; return; }
                 var supervisor = (Supervisor)typeof(ClipWindow).GetField("recorder", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
                 for (int i = 0; i < 90 && !supervisor.Recording; i++) await Task.Delay(500);
@@ -502,13 +624,112 @@ internal static class DesktopChecks
                 ramToggle.IsChecked = false; supervisor.Toggle();
                 for (int i = 0; i < 90 && !supervisor.Recording; i++) await Task.Delay(500);
                 Require(supervisor.Recording, "Disk recording resumes normally after a paused storage change");
+
+                await VerifyRecording(window);
                 exit = 0;
             }
             catch (Exception ex) { results.Add("FAILED: " + ex); }
             finally
             {
+                overlayBackground?.Close();
                 if (window != null) typeof(ClipWindow).GetMethod("Quit", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, null);
                 app.Shutdown();
+            }
+
+            async Task VerifyRecording(ClipWindow window)
+            {
+                var supervisor = (Supervisor)typeof(ClipWindow).GetField("recorder", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+                string saved = "";
+                supervisor.Message += message => { if (message.Type == "saved") saved = message.Path; };
+                window.Show();
+                ((C.Button)window.FindName("RecordingNav")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                var recordingAction = (C.Button)window.FindName("RecordingAction");
+                var recordingPause = (C.Button)window.FindName("RecordingPause");
+                var timed = (C.CheckBox)window.FindName("RecordingTimed");
+                var duration = (Wpf.FrameworkElement)window.FindName("RecordingDuration");
+                var useCapture = (C.CheckBox)window.FindName("RecordingUseCapture");
+                var customQuality = (Wpf.FrameworkElement)window.FindName("RecordingQuality");
+                Require(useCapture.IsChecked == true && customQuality.Visibility == Wpf.Visibility.Collapsed,
+                    "Capture & Quality hides the recording source and quality overrides by default");
+                useCapture.IsChecked = false;
+                Require(customQuality.Visibility == Wpf.Visibility.Visible && !Settings.Load().Recording.UseCaptureQuality,
+                    "Disabling Capture quality reveals the recording source, resolution and frame rate");
+                useCapture.IsChecked = true;
+                Require(timed.Content.Equals("Timed Recording") && duration.Visibility == Wpf.Visibility.Collapsed,
+                    "Recording shows Timed Recording with its duration hidden by default");
+                timed.IsChecked = true;
+                ((C.TextBox)window.FindName("RecordingMinutes")).Text = "2";
+                Require(duration.Visibility == Wpf.Visibility.Visible && Settings.Load().Recording.Timed,
+                    "Enabling Timed Recording reveals and saves the duration option");
+
+                ((C.CheckBox)window.FindName("RecordingIndicator")).IsChecked = true;
+                var liveOverlay = (RecordingOverlay)typeof(ClipWindow).GetField("recordingOverlay", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+                var overlayTimer = (C.TextBlock)typeof(RecordingOverlay).GetField("captureTime", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(liveOverlay)!;
+                var captureScreen = Screen.AllScreens.FirstOrDefault(s => s.DeviceName == Settings.Load().Monitor) ?? Screen.PrimaryScreen!;
+                overlayBackground = new Wpf.Window
+                {
+                    Width = 340, Height = 150, WindowStyle = Wpf.WindowStyle.None, ResizeMode = Wpf.ResizeMode.NoResize,
+                    Background = System.Windows.Media.Brushes.Lime, ShowActivated = false, ShowInTaskbar = false, Topmost = true
+                };
+                overlayBackground.Show();
+                nint backgroundHandle = new WindowInteropHelper(overlayBackground).Handle;
+                nint overlayHandle = new WindowInteropHelper(liveOverlay).Handle;
+                for (int i = 0; i < 20 && overlayTimer.Text != "00:02:00"; i++) await Task.Delay(100);
+                Require(liveOverlay.IsVisible && overlayTimer.Text == "00:02:00", "The idle overlay previews the entered recording duration");
+                await Task.Delay(500);
+                Require(GetWindowRect(overlayHandle, out var idleOverlayRect)
+                    && SetWindowPos(backgroundHandle, overlayHandle, idleOverlayRect.Right - 340, idleOverlayRect.Top - 40, 365, 120, 0x0010),
+                    "Place the solid color fixture directly behind the visible overlay");
+                for (int i = 0; i < 30 && !recordingAction.IsEnabled; i++) await Task.Delay(100);
+                Require(recordingAction.IsEnabled, "Recording is available when the save drive has room");
+                for (int i = 0; i < 60 && (!supervisor.Recording || supervisor.Seconds < 3); i++) await Task.Delay(250);
+                Require(supervisor.Recording && supervisor.Seconds >= 3, "Instant Replay is ready before starting the recording test");
+                recordingAction.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                for (int i = 0; i < 60 && !recordingPause.IsVisible; i++) await Task.Delay(250);
+                Require(recordingPause.IsVisible, "Start Recording opens an independent capture session");
+                await Task.Delay(3500);
+                Require(TimeSpan.TryParse(overlayTimer.Text, out var remaining) && remaining.TotalSeconds is > 0 and < 120,
+                    "The overlay counts down from the configured duration during recording");
+                Require(GetWindowRect(overlayHandle, out var recordingOverlayRect), "Read the visible overlay position during recording");
+                Require(GetWindowRect(backgroundHandle, out var backgroundRect) && backgroundRect.Left < recordingOverlayRect.Left
+                    && backgroundRect.Right > recordingOverlayRect.Right && backgroundRect.Top < recordingOverlayRect.Top
+                    && backgroundRect.Bottom > recordingOverlayRect.Bottom, "The overlay is positioned over the solid color fixture");
+                recordingPause.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                for (int i = 0; i < 30 && !Equals(recordingPause.Content, "Resume"); i++) await Task.Delay(100);
+                Require(Equals(recordingPause.Content, "Resume"), "Recording pauses from the Recording tab");
+                string pausedTimer = overlayTimer.Text;
+                Require(GetWindowRect(overlayHandle, out var replayOverlayRect), "Read the visible overlay position during Instant Replay");
+                saved = "";
+                supervisor.Save();
+                for (int i = 0; i < 60 && saved.Length == 0; i++) await Task.Delay(250);
+                Require(File.Exists(saved) && Equals(recordingPause.Content, "Resume"), "Instant Replay saves while a recording is paused");
+                Require(pausedTimer.EndsWith(" · Paused") && overlayTimer.Text == pausedTimer, "The countdown holds while recording is paused");
+                recordingAction.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                for (int i = 0; i < 60 && !Equals(recordingAction.Content, "Start Recording"); i++) await Task.Delay(250);
+                string recording = Directory.GetFiles(Settings.Load().RecordingsPath, "*.mp4").Single();
+                Require((await MediaTools.Probe(recording, CancellationToken.None)).HasStems, "Stopping a paused recording saves playable video with the standard audio tracks");
+                Require(await ShowsBackground(recording, captureScreen, recordingOverlayRect, Path.Combine(data, "recording-pixel.rgb")),
+                    "A saved recording shows the green desktop area underneath both overlay badges");
+                Require(await ShowsBackground(saved, captureScreen, replayOverlayRect, Path.Combine(data, "replay-pixel.rgb")),
+                    "A saved Instant Replay shows the green desktop area underneath both overlay badges");
+                overlayBackground.Close();
+                overlayBackground = null;
+
+                ((C.Button)window.FindName("LibraryNav")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                var library = (ClipLibrary)typeof(ClipWindow).GetField("library", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+                var recordingTab = (C.RadioButton)library.FindName("RecordingsTab");
+                var libraryList = (C.ListBox)library.FindName("ClipsList");
+                recordingTab.IsChecked = true;
+                for (int i = 0; i < 30 && libraryList.Items.Count != 1; i++) await Task.Delay(100);
+                Require(libraryList.Items.Count == 1 && library.ViewedFolder == Settings.Load().RecordingsPath,
+                    "Recordings appear in their own library tab and open their save folder");
+                await library.OpenClip(recording);
+                var recordingEditor = (ClipEditor)library.FindName("Editor");
+                Require(((C.Button)recordingEditor.FindName("PlayButton")).IsEnabled,
+                    "A saved recording opens in the editor with separate audio preview");
+                ((C.Button)window.FindName("FavoritesNav")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                Require(library.ShowingFavorites && ((C.TextBlock)library.FindName("LibraryHeading")).Text == "Favorites",
+                    "The Favorites sidebar button opens the Favorites view");
             }
         };
         app.Run();
@@ -516,6 +737,24 @@ internal static class DesktopChecks
         return exit;
     }
 
+    private static async Task<bool> ShowsBackground(string file, Screen screen, WindowRect overlay, string pixelPath)
+    {
+        var info = await MediaTools.Probe(file, CancellationToken.None);
+        var bounds = screen.Bounds;
+        int x = (overlay.Left - bounds.Left) * info.Width / bounds.Width;
+        int y = (overlay.Top - bounds.Top) * info.Height / bounds.Height;
+        int width = (overlay.Right - overlay.Left) * info.Width / bounds.Width;
+        int height = (overlay.Bottom - overlay.Top) * info.Height / bounds.Height;
+        var result = await MediaTools.Run("ffmpeg",
+            ["-v", "error", "-sseof", "-1", "-i", file, "-vf", $"crop={width}:{height}:{x}:{y},scale=1:1:flags=area,format=rgb24",
+                "-frames:v", "1", "-f", "rawvideo", "-y", pixelPath], CancellationToken.None);
+        if (result.Exit != 0 || !File.Exists(pixelPath)) return false;
+        var pixel = File.ReadAllBytes(pixelPath);
+        return pixel.Length == 3 && pixel[0] < 20 && pixel[1] > 235 && pixel[2] < 20;
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct WindowRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(nint hwnd, out WindowRect rect);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint hwnd, int index);
     [DllImport("user32.dll")] private static extern bool GetWindowDisplayAffinity(nint hwnd, out uint affinity);
     [DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);

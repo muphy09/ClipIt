@@ -11,7 +11,12 @@ internal sealed class Recorder : IDisposable
 {
     private readonly Settings settings;
     private readonly Action<WorkerMessage> send;
-    private nint output, video, display, gameAudio, discord, microphone;
+    private readonly string? recordingFile;
+    private readonly nint targetWindow;
+    private nint output, video, display, gameAudio, discord, microphone, scene;
+    private nint gameMeter, microphoneMeter;
+    private int gamePeak, microphonePeak;
+    private readonly Obs.AudioMeterUpdated audioMeterCallback;
     private readonly List<nint> audioEncoders = new();
     private CaptureApp? game;
     private string applicationFolder = "Desktop";
@@ -34,10 +39,20 @@ internal sealed class Recorder : IDisposable
     [DllImport("obs.dll", CallingConvention=CallingConvention.Cdecl)] private static extern void base_set_log_handler(NativeLog callback, nint context);
     [DllImport("msvcrt.dll", CallingConvention=CallingConvention.Cdecl)] private static extern int _vsnprintf([Out] byte[] buffer, nuint count, nint format, nint args);
 
-    public Recorder(Settings settings, Action<WorkerMessage> send)
+    public Recorder(Settings settings, Action<WorkerMessage> send, string? recordingFile = null, nint targetWindow = 0)
     {
         this.settings = settings.Validated();
         this.send = send;
+        this.recordingFile = recordingFile;
+        this.targetWindow = targetWindow;
+        audioMeterCallback = (data, _, peak, _) =>
+        {
+            float db = Math.Max(BitConverter.Int32BitsToSingle(Marshal.ReadInt32(peak)),
+                BitConverter.Int32BitsToSingle(Marshal.ReadInt32(peak, sizeof(float))));
+            int level = float.IsFinite(db) ? (int)Math.Clamp((db + 60) * (100f / 60), 0, 100) : 0;
+            if (data == 0) Volatile.Write(ref gamePeak, level);
+            else Volatile.Write(ref microphonePeak, level);
+        };
         savedCallback = (_, _) => Interlocked.Exchange(ref saved, 1);
         fileChangedCallback = (_, data) =>
         {
@@ -74,6 +89,13 @@ internal sealed class Recorder : IDisposable
         Log.Write("Engine " + Obs.Text(Obs.obs_get_version_string()));
         var screen = Screen.AllScreens.FirstOrDefault(s => s.DeviceName == settings.Monitor) ?? Screen.PrimaryScreen ?? Screen.AllScreens[0];
         uint width = (uint)screen.Bounds.Width, height = (uint)screen.Bounds.Height;
+        if (targetWindow != 0)
+        {
+            var size = AppTargets.WindowSize(targetWindow);
+            if (size.Width < 2 || size.Height < 2) throw new IOException("The selected window is unavailable.");
+            width = (uint)size.Width;
+            height = (uint)size.Height;
+        }
         double ratio = Math.Min(1.0, (double)settings.Height / height);
         uint outWidth = (uint)(width * ratio) / 2 * 2, outHeight = (uint)(height * ratio) / 2 * 2;
         var vi = new Obs.VideoInfo
@@ -96,26 +118,54 @@ internal sealed class Recorder : IDisposable
         }
         Obs.obs_post_load_modules();
         SendMicrophoneDevices();
-        display = MakeSource("monitor_capture", "Monitor", d =>
+        display = MakeSource(targetWindow == 0 ? "monitor_capture" : "window_capture", "Recording source", d =>
         {
             Obs.obs_data_set_string(d, "monitor_id", screen.DeviceName);
+            Obs.obs_data_set_string(d, "window", settings.Recording.Window);
+            Obs.obs_data_set_int(d, "priority", 0); // Match the chosen window title.
+            Obs.obs_data_set_bool(d, "client_area", true);
+            Obs.obs_data_set_bool(d, "cursor", settings.Cursor);
             Obs.obs_data_set_int(d, "method", 2); // WGC handles HDR and multiple GPU adapters.
             Obs.obs_data_set_bool(d, "capture_cursor", settings.Cursor);
             Obs.obs_data_set_bool(d, "force_sdr", true);
         });
         game = settings.GameWindow != "auto" ? AppTargets.FromToken(settings.GameWindow) : AppTargets.FullscreenGame(screen.DeviceName);
         applicationFolder = AppTargets.FolderName(game?.Name ?? "Desktop");
-        gameAudio = MakeSource("wasapi_process_output_capture", "Game", d => ConfigureProcess(d, game?.Token ?? ":ClipItWaiting:__clipit_no_game__.exe"));
+        bool systemAudio = recordingFile != null && targetWindow == 0;
+        if (recordingFile == null || settings.Recording.Audio)
+            gameAudio = MakeSource(systemAudio ? "wasapi_output_capture" : "wasapi_process_output_capture", systemAudio ? "System" : "Game", d =>
+            {
+                if (systemAudio) Obs.obs_data_set_string(d, "device_id", "default");
+                else ConfigureProcess(d, game?.Token ?? ":ClipItWaiting:__clipit_no_game__.exe");
+            });
         var discordApp = AppTargets.Discord(settings.DiscordExecutable);
         discordExecutable = discordApp?.Executable ?? settings.DiscordExecutable;
-        discord = MakeSource("wasapi_process_output_capture", "Discord", d => ConfigureProcess(d, discordApp?.Token ?? ":Chrome_WidgetWin_1:" + AppTargets.Encode(discordExecutable)));
+        if (recordingFile == null)
+            discord = MakeSource("wasapi_process_output_capture", "Discord", d => ConfigureProcess(d, discordApp?.Token ?? ":Chrome_WidgetWin_1:" + AppTargets.Encode(discordExecutable)));
         if (settings.Microphone) microphone = MakeSource("wasapi_input_capture", "Microphone", d => Obs.obs_data_set_string(d, "device_id", string.IsNullOrEmpty(settings.MicrophoneDevice) ? "default" : settings.MicrophoneDevice));
-        Obs.obs_set_output_source(0, display);
+        if (targetWindow == 0) Obs.obs_set_output_source(0, display);
+        else
+        {
+            scene = Obs.obs_scene_create("Recording canvas");
+            if (scene == 0) throw new IOException("Could not create the window recording canvas.");
+            nint item = Obs.obs_scene_add(scene, display);
+            if (item == 0) throw new IOException("Could not add the selected window to the recording.");
+            var bounds = new Obs.Vec2 { X = width, Y = height };
+            Obs.obs_sceneitem_set_bounds_type(item, 2); // Scale to fit while preserving aspect ratio.
+            Obs.obs_sceneitem_set_bounds_alignment(item, 0);
+            Obs.obs_sceneitem_set_bounds(item, ref bounds);
+            Obs.obs_set_output_source(0, Obs.obs_scene_get_source(scene));
+        }
         // A headless frontend has no preview to mark sources as showing.
         Obs.obs_source_inc_showing(display);
         displayShowing = true;
-        Obs.obs_source_set_audio_mixers(gameAudio, 1 | 2); // Playback mix plus isolated game stem.
-        Obs.obs_source_set_audio_mixers(discord, 1 | 4);
+        if (targetWindow != 0 && !SpinWait.SpinUntil(
+            () => !AppTargets.HasWindow(targetWindow) || Obs.obs_source_get_width(display) > 0, 4000))
+            throw new IOException("Could not capture the selected window. Make sure it is open and visible.");
+        if (targetWindow != 0 && !AppTargets.HasWindow(targetWindow))
+            throw new IOException("The selected window closed before recording could start.");
+        if (gameAudio != 0) Obs.obs_source_set_audio_mixers(gameAudio, 1 | 2);
+        if (discord != 0) Obs.obs_source_set_audio_mixers(discord, 1 | 4);
         Obs.obs_set_output_source(1, gameAudio);
         Obs.obs_set_output_source(2, discord);
         if (microphone != 0) { Obs.obs_source_set_audio_mixers(microphone, 1 | 8); Obs.obs_set_output_source(3, microphone); }
@@ -126,17 +176,24 @@ internal sealed class Recorder : IDisposable
         string[] preferred = ["obs_nvenc_h264_tex", "jim_nvenc", "h264_texture_amf", "h264_fallback_amf", "obs_qsv11_v2", "obs_qsv11"];
         string[] candidates = preferred.Where(encoders.Contains).ToArray();
         if (candidates.Length == 0) throw new InvalidOperationException("No supported hardware H.264 encoder is available. Check your graphics driver.");
-        string[] trackNames = ["ClipIt Mix", "Game", "Discord", "Microphone"];
-        for (int i = 0; i < trackNames.Length; i++)
+        // Keep the same mixer indices as replay clips so the editor can isolate each stem.
+        (string Name, int Mixer)[] tracks = [("ClipIt Mix", 0), (systemAudio ? "System" : "Game", 1), ("Discord", 2), ("Microphone", 3)];
+        foreach (var (name, mixer) in tracks)
         {
-            int mixer = i;
-            var encoder = WithData(d => { Obs.obs_data_set_int(d, "bitrate", 192); return Obs.obs_audio_encoder_create("ffmpeg_aac", trackNames[mixer], d, (nuint)mixer, 0); });
+            var encoder = WithData(d => { Obs.obs_data_set_int(d, "bitrate", 192); return Obs.obs_audio_encoder_create("ffmpeg_aac", name, d, (nuint)mixer, 0); });
             if (encoder == 0) throw new InvalidOperationException("AAC audio encoder unavailable.");
             audioEncoders.Add(encoder); Obs.obs_encoder_set_audio(encoder, Obs.obs_get_audio());
         }
-        if (!settings.BufferInMemory) diskBuffer = CreateDiskBuffer();
+        if (recordingFile == null && !settings.BufferInMemory) diskBuffer = CreateDiskBuffer();
         output = WithData(d =>
         {
+            if (recordingFile != null)
+            {
+                Obs.obs_data_set_string(d, "path", recordingFile);
+                // Write recoverable fragments directly to MP4 without a second full-size file.
+                Obs.obs_data_set_string(d, "muxer_settings", "movflags=frag_keyframe+empty_moov+default_base_moof");
+                return Obs.obs_output_create("ffmpeg_muxer", "Continuous recording", d, 0);
+            }
             if (diskBuffer != null)
             {
                 ConfigureDiskSettings(d);
@@ -178,11 +235,47 @@ internal sealed class Recorder : IDisposable
             video = 0;
         }
         if (video == 0) throw new InvalidOperationException("Hardware encoder could not start. Check app.log for details.");
-        if (diskBuffer == null) Obs.signal_handler_connect(Obs.obs_output_get_signal_handler(output), "saved", savedCallback, 0);
+        if (recordingFile != null)
+        {
+            gameMeter = AttachMeter(gameAudio, 0);
+            microphoneMeter = AttachMeter(microphone, 1);
+        }
+        if (recordingFile == null && diskBuffer == null) Obs.signal_handler_connect(Obs.obs_output_get_signal_handler(output), "saved", savedCallback, 0);
         lifetime.Restart();
         diskBuffer?.StartClock();
-        send(new("started", $"{outWidth} × {outHeight} · {settings.Fps} FPS · H.264 · 3 separate audio sources"));
-        SendApplication();
+        send(new("started", $"{outWidth} × {outHeight} · {settings.Fps} FPS · H.264" +
+            (recordingFile == null ? " · 3 separate audio sources" : "")));
+        if (recordingFile == null) SendApplication();
+    }
+
+    internal bool OutputActive => output != 0 && Obs.obs_output_active(output);
+    internal (int Game, int Microphone) AudioLevels => (Volatile.Read(ref gamePeak), Volatile.Read(ref microphonePeak));
+    internal bool PauseOutput(bool pause) => Obs.obs_output_pause(output, pause);
+    internal string OutputError => Obs.Text(Obs.obs_output_get_last_error(output));
+    private nint AttachMeter(nint source, nint index)
+    {
+        if (source == 0) return 0;
+        nint meter = Obs.obs_volmeter_create(2);
+        if (meter == 0) return 0;
+        if (Obs.obs_volmeter_attach_source(meter, source))
+        {
+            Obs.obs_volmeter_add_callback(meter, audioMeterCallback, index);
+            return meter;
+        }
+        Obs.obs_volmeter_destroy(meter);
+        return 0;
+    }
+    internal void StopRecording(bool paused)
+    {
+        if (!OutputActive) return;
+        if (paused) Obs.obs_output_force_stop(output);
+        else Obs.obs_output_stop(output);
+        if (!SpinWait.SpinUntil(() => !OutputActive, 4000))
+        {
+            Obs.obs_output_force_stop(output);
+            if (!SpinWait.SpinUntil(() => !OutputActive, 4000))
+                throw new IOException("The recording did not finish closing.");
+        }
     }
 
     private DiskReplayBuffer CreateDiskBuffer() => new(settings, message =>
@@ -345,15 +438,18 @@ internal sealed class Recorder : IDisposable
         if (!initialized) return;
         if (output != 0)
         {
-            if (diskBuffer == null) Obs.signal_handler_disconnect(Obs.obs_output_get_signal_handler(output), "saved", savedCallback, 0);
-            else Obs.signal_handler_disconnect(Obs.obs_output_get_signal_handler(output), "file_changed", fileChangedCallback, 0);
+            if (diskBuffer != null) Obs.signal_handler_disconnect(Obs.obs_output_get_signal_handler(output), "file_changed", fileChangedCallback, 0);
+            else if (recordingFile == null) Obs.signal_handler_disconnect(Obs.obs_output_get_signal_handler(output), "saved", savedCallback, 0);
             Obs.obs_output_stop(output);
             var end = Stopwatch.StartNew();
             while (Obs.obs_output_active(output) && end.Elapsed.TotalSeconds < 4) Thread.Sleep(50);
             Obs.obs_output_release(output); output = 0;
         }
         diskBuffer?.Dispose(); diskBuffer = null;
+        if (gameMeter != 0) Obs.obs_volmeter_destroy(gameMeter);
+        if (microphoneMeter != 0) Obs.obs_volmeter_destroy(microphoneMeter);
         for (uint i = 0; i < 4; i++) Obs.obs_set_output_source(i, 0);
+        if (scene != 0) Obs.obs_scene_release(scene);
         if (displayShowing) Obs.obs_source_dec_showing(display);
         foreach (var source in new[] { display, gameAudio, discord, microphone }) if (source != 0) Obs.obs_source_release(source);
         if (video != 0) Obs.obs_encoder_release(video);
@@ -361,6 +457,7 @@ internal sealed class Recorder : IDisposable
         Obs.obs_shutdown();
         initialized = false;
         GC.KeepAlive(savedCallback); GC.KeepAlive(fileChangedCallback); GC.KeepAlive(logCallback);
+        GC.KeepAlive(audioMeterCallback);
     }
 
     internal static int RunWorker(string pipeName, string settingsJson)

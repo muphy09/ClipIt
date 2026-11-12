@@ -1,3 +1,23 @@
+## [v0.6.8]
+
+### What's New
+
+- Recording has been introduced
+    - Recording overlay can be toggled on/off
+    - Instant Replay can still be used while recording
+- Playback timer introduced inside clip preview
+    - 0.25x -> 2.00x
+- Master Volume is now included in the Audio Mixer
+- Audio sources now start their slider at 50%, letting you increase the volume if needed
+- Instant Replay length increased to 10 min
+- Favorties section moved to the tab list
+    - Mark as Favorite changed to the Star icon
+- Your Clips can now be viewed in List and Tile
+
+### Bugfixes
+
+- Trim timeline properly disappears when the mouse is not active in the frame
+
 ## [v0.6.7]
 
 ### Bug Fixes

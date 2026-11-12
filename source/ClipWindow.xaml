@@ -23,6 +23,26 @@
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="Theme.xaml"/></ResourceDictionary.MergedDictionaries>
       <ImageBrush x:Key="BrandMark" ImageSource="Assets/ClipIt-logo.png" ViewboxUnits="RelativeToBoundingBox" Viewbox="0.183,0.117,0.610,0.517" Stretch="Uniform"/>
+      <Style x:Key="CaptureSectionTitle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource Text}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+      </Style>
+      <Style x:Key="CaptureStatusCard" TargetType="Border">
+        <Setter Property="BorderBrush" Value="#29466E"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="22"/>
+        <Setter Property="Margin" Value="0,0,0,16"/>
+        <Setter Property="Background">
+          <Setter.Value><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#162B47"/><GradientStop Offset="1" Color="#111B2B"/></LinearGradientBrush></Setter.Value>
+        </Setter>
+      </Style>
+      <Style x:Key="RecordingOption" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+        <Setter Property="ContentTemplate">
+          <Setter.Value><DataTemplate><TextBlock Text="{Binding}" Style="{StaticResource FieldLabel}" Margin="0"/></DataTemplate></Setter.Value>
+        </Setter>
+      </Style>
     </ResourceDictionary>
   </Window.Resources>
   <Border BorderBrush="#28364B" BorderThickness="1" CornerRadius="11" ClipToBounds="True">
@@ -57,8 +77,14 @@
               <Button x:Name="CaptureNav" Style="{StaticResource LeftNavigation}" Background="#14294A" BorderBrush="#244876" Padding="14,12" Margin="0,0,0,8" Click="Capture_Click" AutomationProperties.Name="Capture settings">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE714;" FontFamily="Segoe Fluent Icons" Foreground="#70A7FF" FontSize="16" Margin="0,0,11,0"/><TextBlock Text="Capture" Foreground="#A8CBFF" FontWeight="SemiBold"/></StackPanel>
               </Button>
-              <Button x:Name="LibraryNav" Style="{StaticResource LeftNavigation}" HorizontalContentAlignment="Left" Click="Library_Click" Padding="14,12" AutomationProperties.Name="Your Clips">
+              <Button x:Name="RecordingNav" Style="{StaticResource LeftNavigation}" HorizontalContentAlignment="Left" Click="Recording_Click" Padding="14,12" Margin="0,0,0,8" AutomationProperties.Name="Recording">
+                <StackPanel Orientation="Horizontal"><Ellipse Width="12" Height="12" Stroke="#7B91AF" StrokeThickness="1.5" Margin="2,0,13,0"/><TextBlock Text="Recording" Foreground="#93A5BF"/></StackPanel>
+              </Button>
+              <Button x:Name="LibraryNav" Style="{StaticResource LeftNavigation}" HorizontalContentAlignment="Left" Click="Library_Click" Padding="14,12" Margin="0,0,0,8" AutomationProperties.Name="Your Clips">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons" Foreground="#7B91AF" FontSize="16" Margin="0,0,11,0"/><TextBlock Text="Your Clips" Foreground="#93A5BF"/></StackPanel>
+              </Button>
+              <Button x:Name="FavoritesNav" Style="{StaticResource LeftNavigation}" HorizontalContentAlignment="Left" Click="Favorites_Click" Padding="14,12" AutomationProperties.Name="Favorites">
+                <StackPanel Orientation="Horizontal"><Path Width="16" Height="16" Stretch="Uniform" Stroke="#A9BDD9" StrokeThickness="1.35" StrokeLineJoin="Round" Margin="0,0,11,0" Data="M 8,1 L 10.2,5.5 15.2,6.2 11.6,9.7 12.4,14.7 8,12.3 3.6,14.7 4.4,9.7 0.8,6.2 5.8,5.5 Z"/><TextBlock Text="Favorites" Foreground="#93A5BF"/></StackPanel>
               </Button>
             </StackPanel>
             <StackPanel Grid.Row="3">
@@ -87,8 +113,7 @@
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,5,0">
             <StackPanel Margin="30,24,25,24">
               <TextBlock Text="Capture" FontSize="27" FontWeight="SemiBold" Margin="0,0,0,21"/>
-              <Border BorderBrush="#29466E" BorderThickness="1" CornerRadius="12" Padding="22" Margin="0,0,0,16">
-                <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#162B47"/><GradientStop Offset="1" Color="#111B2B"/></LinearGradientBrush></Border.Background>
+              <Border Style="{StaticResource CaptureStatusCard}">
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <StackPanel>
@@ -111,7 +136,7 @@
               </Grid>
               <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                 <StackPanel>
-                  <Grid Margin="0,0,0,18"><TextBlock Text="Capture &amp; Quality" FontWeight="SemiBold" FontSize="14"/><TextBlock Text="HARDWARE ENCODED" FontSize="9" Foreground="#6289BC" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
+                  <Grid Margin="0,0,0,18"><TextBlock Text="Capture &amp; Quality" Style="{StaticResource CaptureSectionTitle}"/><TextBlock Text="HARDWARE ENCODED" FontSize="9" Foreground="#6289BC" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
                   <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="1.6*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <StackPanel><TextBlock Text="Display" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="MonitorBox" AutomationProperties.Name="Capture display"/></StackPanel>
@@ -129,7 +154,7 @@
               <Border x:Name="QualityNotice" Style="{StaticResource InlineNotice}"><TextBlock x:Name="QualityNoticeText" TextWrapping="Wrap" Foreground="#F5CCA0" FontSize="12"/></Border>
               <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                 <StackPanel>
-                  <TextBlock Text="Save Location" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,18"/>
+                  <TextBlock Text="Save Location" Style="{StaticResource CaptureSectionTitle}" Margin="0,0,0,18"/>
                   <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <StackPanel><TextBlock Text="Save folder" Style="{StaticResource FieldLabel}"/><TextBox x:Name="FolderBox" AutomationProperties.Name="Save folder" ToolTip="Clips are saved in per-application subfolders here."/></StackPanel>
@@ -150,7 +175,7 @@
               <Border x:Name="LocationNotice" Style="{StaticResource InlineNotice}"><TextBlock x:Name="LocationNoticeText" TextWrapping="Wrap" Foreground="#F5CCA0" FontSize="12"/></Border>
               <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                 <StackPanel>
-                  <TextBlock Text="Application Selection" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,14"/>
+                  <TextBlock Text="Application Selection" Style="{StaticResource CaptureSectionTitle}" Margin="0,0,0,14"/>
                   <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ComboBox x:Name="GameAppBox" AutomationProperties.Name="Game audio application"/><Button Grid.Column="1" Content="Refresh apps" Style="{StaticResource Quiet}" Click="RefreshApps_Click" Margin="8,0,0,0"/></Grid>
                   <TextBlock x:Name="GameCaptureStatus" Text="Checking the application audio source…" Foreground="#95B9E9" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"/>
                   <TextBlock Text="Automatic mode follows a full-screen game and retains it while you alt-tab. Discord and microphone are separate tracks." Foreground="#879FBE" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,0"/>
@@ -159,7 +184,7 @@
               <Border x:Name="ApplicationNotice" Style="{StaticResource InlineNotice}"><TextBlock x:Name="ApplicationNoticeText" TextWrapping="Wrap" Foreground="#F5CCA0" FontSize="12"/></Border>
               <Border Style="{StaticResource Card}">
                 <StackPanel>
-                  <Grid Margin="0,0,0,17"><TextBlock Text="Audio &amp; cursor" FontWeight="SemiBold" FontSize="14"/><TextBlock Text="SEPARATE AUDIO TRACKS" Foreground="#6289BC" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
+                  <Grid Margin="0,0,0,17"><TextBlock Text="Audio &amp; cursor" Style="{StaticResource CaptureSectionTitle}"/><TextBlock Text="SEPARATE AUDIO TRACKS" Foreground="#6289BC" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
                   <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="36"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <CheckBox x:Name="MicToggle" AutomationProperties.Name="Include microphone"><StackPanel><TextBlock Text="Microphone" FontSize="12"/><TextBlock Text="Record the selected input" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"/></StackPanel></CheckBox>
@@ -183,6 +208,83 @@
             </Grid>
           </Border>
         </Grid>
+        <ScrollViewer x:Name="RecordingPanel" Grid.Column="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,5,0">
+          <StackPanel Margin="30,24,25,24">
+            <TextBlock Text="Recording" FontSize="27" FontWeight="SemiBold" Margin="0,0,0,21"/>
+            <Border Style="{StaticResource CaptureStatusCard}">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel Margin="0,0,16,0">
+                  <TextBlock x:Name="RecordingStatus" Text="Ready to record" FontSize="21" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                  <TextBlock x:Name="RecordingStats" Style="{StaticResource MutedText}" FontSize="11" Margin="0,5,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                  <Button x:Name="RecordingPause" Content="Pause" Click="RecordingPause_Click" Visibility="Collapsed" Margin="0,0,8,0" MinWidth="90"/>
+                  <Button x:Name="RecordingAction" Content="Start Recording" Click="RecordingAction_Click" Style="{StaticResource Primary}" MinWidth="146" IsEnabled="False"/>
+                </StackPanel>
+              </Grid>
+            </Border>
+            <StackPanel x:Name="RecordingConfiguration">
+              <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                <StackPanel>
+                  <TextBlock Text="Capture &amp; Quality" Style="{StaticResource CaptureSectionTitle}" Margin="0,0,0,18"/>
+                  <CheckBox x:Name="RecordingUseCapture" Content="Use Capture quality settings" Style="{StaticResource RecordingOption}"/>
+                  <StackPanel x:Name="RecordingQuality" Margin="0,14,0,0" Visibility="Collapsed">
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <StackPanel><TextBlock Text="Display or window" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="RecordingSource" AutomationProperties.Name="Recording source"/></StackPanel>
+                      <Button Grid.Column="1" Content="Refresh" Style="{StaticResource Quiet}" Click="RefreshRecordingSources_Click" Margin="8,0,0,0" VerticalAlignment="Bottom"/>
+                    </Grid>
+                    <UniformGrid Columns="2" Margin="0,12,0,0">
+                      <StackPanel Margin="0,0,10,0"><TextBlock Text="Resolution" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="RecordingHeight" AutomationProperties.Name="Recording resolution"/></StackPanel>
+                      <StackPanel><TextBlock Text="Frame rate" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="RecordingFps" AutomationProperties.Name="Recording frame rate"/></StackPanel>
+                    </UniformGrid>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                <StackPanel>
+                  <TextBlock Text="Audio &amp; cursor" Style="{StaticResource CaptureSectionTitle}" Margin="0,0,0,17"/>
+                  <CheckBox x:Name="RecordingAudio" Content="Game or system audio" Style="{StaticResource RecordingOption}" Margin="0,0,0,10"/>
+                  <ProgressBar x:Name="RecordingGameLevel" Height="5" Maximum="100" Foreground="#55D9AB" Background="#27364C" Margin="0,0,0,10" Visibility="Collapsed" AutomationProperties.Name="Game or system audio level"/>
+                  <CheckBox x:Name="RecordingMic" Content="Microphone" Style="{StaticResource RecordingOption}" Margin="0,0,0,10"/>
+                  <ComboBox x:Name="RecordingMicDevice" AutomationProperties.Name="Recording microphone device" Margin="0,0,0,12"/>
+                  <ProgressBar x:Name="RecordingMicLevel" Height="5" Maximum="100" Foreground="#55D9AB" Background="#27364C" Margin="0,0,0,10" Visibility="Collapsed" AutomationProperties.Name="Microphone level"/>
+                  <CheckBox x:Name="RecordingCursor" Content="Record cursor" Style="{StaticResource RecordingOption}"/>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+            <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+              <StackPanel>
+                <TextBlock Text="Controls &amp; Overlay" Style="{StaticResource CaptureSectionTitle}" Margin="0,0,0,18"/>
+                <DockPanel Margin="0,0,0,12">
+                  <TextBox x:Name="RecordingShortcutBox" DockPanel.Dock="Right" Width="230" IsReadOnly="True" TextAlignment="Center" FontWeight="SemiBold" Foreground="#A9CCFF" PreviewMouseLeftButtonDown="Shortcut_Click" PreviewKeyDown="Shortcut_KeyDown" GotKeyboardFocus="Shortcut_Focused" LostKeyboardFocus="Shortcut_Blurred" AutomationProperties.Name="Start or stop recording shortcut"/>
+                  <TextBlock Text="Start / stop shortcut" Style="{StaticResource FieldLabel}" Margin="0" VerticalAlignment="Center"/>
+                </DockPanel>
+                <CheckBox x:Name="RecordingIndicator" Content="Recording indicator" Style="{StaticResource RecordingOption}" Margin="0,0,0,10"/>
+                <Grid x:Name="RecordingTimeRow" Margin="20,4,0,16" Visibility="Collapsed"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Margin="0,0,24,0"><TextBlock Text="Show recording time" FontSize="13"/><TextBlock Text="Include the timer in the recording indicator." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel><CheckBox x:Name="RecordingTime" Grid.Column="1" Width="44" AutomationProperties.Name="Show recording time"/></Grid>
+                <CheckBox x:Name="RecordingSounds" Content="Start and stop sounds" Style="{StaticResource RecordingOption}" Margin="0,0,0,10"/>
+                <CheckBox x:Name="RecordingTimed" Content="Timed Recording" Style="{StaticResource RecordingOption}"/>
+                <StackPanel x:Name="RecordingDuration" Orientation="Horizontal" Margin="0,10,0,0">
+                  <TextBox x:Name="RecordingMinutes" Width="76" MaxLength="5" AutomationProperties.Name="Recording duration in minutes"/>
+                  <TextBlock Text="minutes of recording" Style="{StaticResource MutedText}" FontSize="11" VerticalAlignment="Center" Margin="9,0,0,0"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock Text="Save Location" Style="{StaticResource CaptureSectionTitle}" Margin="0,0,0,18"/>
+                <TextBlock x:Name="RecordingPath" TextWrapping="Wrap" Style="{StaticResource MutedText}" FontSize="11"/>
+                <TextBlock x:Name="RecordingDiskError" Foreground="#F89999" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                  <Button x:Name="RecordingChangeFolder" Content="Change folder" Click="RecordingBrowse_Click"/>
+                  <Button Content="Open folder" Click="RecordingOpenFolder_Click" Margin="8,0,0,0"/>
+                  <Button x:Name="RecordingResetFolder" Content="Use default" Click="RecordingDefaultFolder_Click" Margin="8,0,0,0"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
         <Border x:Name="LibraryHost" Grid.Column="1" Visibility="Collapsed"/>
         <ScrollViewer x:Name="GeneralSettingsPanel" Grid.Column="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
           <StackPanel Margin="30,24,30,24">
@@ -215,7 +317,7 @@
             <Border Style="{StaticResource Card}" Margin="0,0,0,16">
               <StackPanel>
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                  <StackPanel Margin="0,0,24,0"><TextBlock Text="Overlay" FontSize="13"/><TextBlock Text="Show recording status in the bottom-right corner of the capture display." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
+                  <StackPanel Margin="0,0,24,0"><TextBlock Text="Instant Replay overlay" FontSize="13"/><TextBlock Text="Show replay status in the bottom-right corner of the capture display." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
                   <CheckBox x:Name="OverlayToggle" Grid.Column="1" Width="44" AutomationProperties.Name="Overlay"/>
                 </Grid>
                 <TextBlock Text="A check means recording; an X means capture is inactive. Flashes green when a clip is saved." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,18,0,0"/>

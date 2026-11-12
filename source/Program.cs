@@ -11,10 +11,12 @@ internal static class Program
         Velopack.VelopackApp.Build().SetAutoApplyOnStartup(false).Run();
         ApplicationConfiguration.Initialize();
         if (args.Length == 3 && args[0] == "--worker") return Recorder.RunWorker(args[1], args[2]);
+        if (args.Length == 2 && args[0] == "--recording-worker") return RecordingSession.RunWorker(args[1]);
         if (args.Length > 0 && args[0] == "--smoke") return Smoke.Run(args);
         if (args.Length == 2 && args[0] == "--media-checks") return MediaChecks.Run(args[1]).GetAwaiter().GetResult();
         if (args.Length == 2 && args[0] == "--buffer-checks") return BufferChecks.Run(args[1]).GetAwaiter().GetResult();
         if (args.Length == 2 && args[0] == "--desktop-checks") return DesktopChecks.Run(args[1]);
+        if (args.Length == 2 && args[0] == "--recording-checks") return DesktopChecks.Run(args[1], recordingOnly: true);
         if (args.Length == 2 && args[0] == "--capture-ui-checks") return DesktopChecks.Run(args[1], recordingChecks: false);
         if (args.Length == 2 && args[0] == "--library-checks") return LibraryChecks.Run(args[1]);
         if (args.Length == 2 && args[0] == "--list-apps") { File.WriteAllText(args[1], System.Text.Json.JsonSerializer.Serialize(AppTargets.List())); return 0; }
