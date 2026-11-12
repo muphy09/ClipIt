@@ -13,7 +13,7 @@
             </Grid>
           </Border>
           <StackPanel Grid.Row="1" Margin="0,8,0,0">
-            <TextBlock Text="{Binding Application}" Foreground="#EFF4FC" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Application}"/>
+            <TextBlock Foreground="#EFF4FC" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding TileTitle}"><Run Text="{Binding TileTitle, Mode=OneWay}"/><Run Text="{Binding TileGameLabel, Mode=OneWay}" Foreground="#93A9C8" FontSize="11" FontWeight="Normal"/></TextBlock>
             <TextBlock Text="{Binding Date}" Foreground="#93A9C8" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
           </StackPanel>
         </Grid>

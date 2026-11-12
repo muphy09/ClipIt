@@ -466,6 +466,8 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         public bool IsLinked { get; }
         public bool IsRecording { get; }
         public string Title { get; }
+        public string TileTitle { get; }
+        public string TileGameLabel => !IsRecording && TileTitle != Application ? "\u00a0\u00a0" + Application : "";
         public string Date => Stamp.Modified.ToLocalTime().ToString("MMM d, yyyy  ·  h:mm tt");
         public string Detail { get; private set; }
         public BitmapImage? Thumbnail { get; private set; }
@@ -478,7 +480,8 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         {
             Path = path; Stamp = stamp; Application = application; IsFavorite = isFavorite; IsLinked = isLinked;
             IsRecording = isRecording;
-            Title = isLinked || isRecording ? System.IO.Path.GetFileNameWithoutExtension(path) : ClipFiles.Title(path, application);
+            TileTitle = isLinked ? application : ClipFiles.Title(path, application);
+            Title = isLinked || isRecording ? System.IO.Path.GetFileNameWithoutExtension(path) : TileTitle;
             Detail = MediaTools.Gigabytes(stamp.Size);
         }
         public void SetThumbnail(BitmapImage image) { Thumbnail = image; PropertyChanged?.Invoke(this, new(nameof(Thumbnail))); }
