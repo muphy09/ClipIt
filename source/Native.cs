@@ -51,6 +51,7 @@ internal static class Obs
     [DllImport(Dll, CallingConvention=C)] internal static extern void obs_source_release(nint source);
     [DllImport(Dll, CallingConvention=C)] internal static extern void obs_source_update(nint source, nint settings);
     [DllImport(Dll, CallingConvention=C)] internal static extern void obs_source_set_audio_mixers(nint source, uint mixers);
+    [DllImport(Dll, CallingConvention=C)] internal static extern void obs_source_set_volume(nint source, float volume);
     [DllImport(Dll, CallingConvention=C)] internal static extern void obs_output_update(nint output, nint settings);
     [DllImport(Dll, CallingConvention=C)] internal static extern void obs_source_inc_showing(nint source);
     [DllImport(Dll, CallingConvention=C)] internal static extern void obs_source_dec_showing(nint source);

@@ -47,7 +47,11 @@ internal static class LibraryChecks
                 Require(clips.Items.Count == 6 && PathOf(clips.Items[0]) == newer, "Recent includes all folders with newest clip first");
                 ((C.RadioButton)library.FindName("ByGameTab")).IsChecked = true;
                 string[] names = games.Items.Cast<object>().Select(g => (string)g.GetType().GetProperty("Name")!.GetValue(g)!).ToArray();
-                Require(names.SequenceEqual(new[] { "Alpha", "Desktop", "Unsorted", "zebra" }), "Game folders sort alphabetically, including Desktop and unknown imports");
+                Require(names.SequenceEqual(new[] { "Alpha", "Desktop", "Unsorted", "Zebra" }), "Game folders sort alphabetically, including Desktop and unknown imports");
+                object zebra = games.Items[3];
+                long zebraSize = new FileInfo(newer).Length + new FileInfo(old).Length;
+                string zebraDetail = (string)zebra.GetType().GetProperty("Detail")!.GetValue(zebra)!;
+                Require(zebraDetail == $"2 clips ({zebraSize / 1024.0:0.##} KB)", "By Game shows the combined size of its clips");
                 Require(ClipFiles.Application(Path.Combine(libraryFolder, "Alpha", "Exports", "Edited.mp4"), libraryFolder) == "Alpha", "Nested exports retain their top-level game");
                 games.SelectedIndex = 3;
                 Invoke("OpenGame", "zebra");
@@ -62,16 +66,50 @@ internal static class LibraryChecks
                 Require(!(bool)Invoke("CanImport", newer)! && (bool)Invoke("CanImport", fixture)!, "Drop eligibility rejects library clips and accepts external clips");
                 ((C.RadioButton)library.FindName("RecentTab")).IsChecked = true;
                 clips.SelectedItem = clips.Items.Cast<object>().First(i => PathOf(i) == newer);
+                var menu = clips.ContextMenu;
+                menu.RaiseEvent(new Wpf.RoutedEventArgs(C.ContextMenu.OpenedEvent));
                 Invoke("Copy_Click", library, new Wpf.RoutedEventArgs()); copied = true;
                 Require(Wpf.Clipboard.GetFileDropList().Cast<string>().SequenceEqual(new[] { newer }), "Copy places the selected file on the clipboard for pasting");
-                var menu = clips.ContextMenu;
                 Require(menu.Items.Cast<C.MenuItem>().Select(i => (string)i.Header).SequenceEqual(new[] { "Copy", "Delete" }) && menu.Style != null, "Clip menu offers themed Copy and Delete actions");
-                Invoke("Delete_Click", library, new Wpf.RoutedEventArgs());
+                window = new Wpf.Window { Title = "ClipIt library checks", Content = library, Width = 1000, Height = 720, Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(11, 16, 25)), ShowInTaskbar = false };
+                window.Show();
+                await Reload();
+                object deletingClip = clips.Items.Cast<object>().First(i => PathOf(i) == newer);
+                object otherClip = clips.Items.Cast<object>().First(i => PathOf(i) == old);
+                var previewTask = deletingClip.GetType().GetField("PreviewTask")!;
+                if (previewTask.GetValue(deletingClip) is Task runningPreview) await runningPreview;
+                var finishPreview = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                previewTask.SetValue(deletingClip, finishPreview.Task);
+                bool HasDeleteAppearance(object clip, bool pending)
+                {
+                    clips.ScrollIntoView(clip);
+                    window.UpdateLayout();
+                    var card = (C.ListBoxItem)clips.ItemContainerGenerator.ContainerFromItem(clip);
+                    var status = (Wpf.FrameworkElement)card.Template.FindName("DeleteStatus", card);
+                    var content = (Wpf.FrameworkElement)card.Template.FindName("CardContent", card);
+                    var spinner = (Wpf.FrameworkElement)card.Template.FindName("DeleteSpinner", card);
+                    return status.IsVisible == pending && (content.Opacity < 1) == pending
+                        && spinner.RenderTransform.HasAnimatedProperties == pending
+                        && (Wpf.Automation.AutomationProperties.GetItemStatus(card) == "Deleting") == pending;
+                }
+                clips.SelectedItem = deletingClip;
+                menu.RaiseEvent(new Wpf.RoutedEventArgs(C.ContextMenu.OpenedEvent));
+                try
+                {
+                    Invoke("Delete_Click", library, new Wpf.RoutedEventArgs());
+                    Require(File.Exists(newer) && HasDeleteAppearance(deletingClip, true) && HasDeleteAppearance(otherClip, false),
+                        "Delete immediately dims only the pending list card and shows its status");
+                    ((C.RadioButton)library.FindName("TileViewButton")).IsChecked = true;
+                    await Reload();
+                    Require(HasDeleteAppearance(deletingClip, true) && HasDeleteAppearance(otherClip, false),
+                        "The pending delete indicator survives a refresh and follows the clip into tiles");
+                }
+                finally { finishPreview.SetResult(); }
                 for (int i = 0; i < 100 && (File.Exists(newer) || clips.Items.Cast<object>().Any(c => PathOf(c) == newer)); i++) await Task.Delay(50);
                 Require(!File.Exists(newer) && File.Exists(old) && !clips.Items.Cast<object>().Any(c => PathOf(c) == newer), "Delete removes only the selected disposable clip and refreshes the list");
                 Require(ClipFiles.SaveName("Desktop").StartsWith("Desktop " ) && ClipFiles.SaveName("Alpha").StartsWith("Alpha ") && ClipFiles.SaveName("Alpha") != ClipFiles.SaveName("Alpha"), "Save names begin with Desktop or the game and remain unique");
-                window = new Wpf.Window { Title = "ClipIt library checks", Content = library, Width = 1000, Height = 720, Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(11, 16, 25)), ShowInTaskbar = false };
-                window.Show(); await Task.Delay(1000);
+                ((C.RadioButton)library.FindName("ListViewButton")).IsChecked = true;
+                await Task.Delay(1000);
                 void Snapshot(string name)
                 {
                     window.UpdateLayout(); var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);

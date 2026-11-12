@@ -16,8 +16,10 @@ public sealed record RecordingOptions
     public bool Audio { get; init; } = true;
     public bool? Microphone { get; init; }
     public string MicrophoneDevice { get; init; } = "";
+    public int? MicrophoneBoostDb { get; init; }
     public bool? Cursor { get; init; }
     public bool Indicator { get; init; }
+    public OverlayCorner OverlayCorner { get; init; } = OverlayCorner.BottomRight;
     public bool ShowTime { get; init; } = true;
     public bool Sounds { get; init; } = true;
     public bool Timed { get; init; }
@@ -156,6 +158,7 @@ internal sealed class RecordingSession : IDisposable
                         : options.Height, options.Fps),
                 Microphone = options.Microphone ?? settings.Microphone,
                 MicrophoneDevice = options.MicrophoneDevice.Length == 0 ? settings.MicrophoneDevice : options.MicrophoneDevice,
+                MicrophoneBoostDb = options.MicrophoneBoostDb ?? settings.MicrophoneBoostDb,
                 Cursor = options.Cursor ?? settings.Cursor
             };
             string reason;

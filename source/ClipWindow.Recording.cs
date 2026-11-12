@@ -17,6 +17,7 @@ public partial class ClipWindow
     private int recordingHotkeyId = 5;
     private bool recordingRegistered;
     private string recordingMonitor = "";
+    private nint recordingWindow;
     private List<AudioDevice> recordingDevices = [new("default", "System default microphone")];
 
     private sealed record RecordingSourceChoice(string Label, string Monitor = "", string Window = "")
@@ -41,8 +42,10 @@ public partial class ClipWindow
         RecordingUseCapture.IsChecked = options.UseCaptureQuality;
         RecordingAudio.IsChecked = options.Audio;
         RecordingMic.IsChecked = options.Microphone ?? settings.Microphone;
+        RecordingMicBoost.Value = options.MicrophoneBoostDb ?? settings.MicrophoneBoostDb;
         RecordingCursor.IsChecked = options.Cursor ?? settings.Cursor;
         RecordingIndicator.IsChecked = options.Indicator;
+        RecordingOverlayCorner.SelectedCorner = options.OverlayCorner;
         RecordingTime.IsChecked = options.ShowTime;
         RecordingSounds.IsChecked = options.Sounds;
         RecordingTimed.IsChecked = options.Timed;
@@ -59,6 +62,13 @@ public partial class ClipWindow
         foreach (var box in new[] { RecordingSource, RecordingHeight, RecordingFps, RecordingMicDevice })
             box.SelectionChanged += RecordingOptionsChanged;
         RecordingMinutes.TextChanged += RecordingOptionsChanged;
+        RecordingMicBoost.ValueChanged += RecordingOptionsChanged;
+        RecordingOverlayCorner.CornerChanged += RecordingOptionsChanged;
+        RecordingMicDevice.SelectionChanged += (_, _) =>
+        {
+            if (!populatingRecording && micTest?.ForRecording == true) StartMicTest(forRecording: true);
+        };
+        RecordingMicDevice.DropDownOpened += (_, _) => recorder.RefreshMicrophones();
         session.Message += OnRecordingMessage;
         UpdateRecordingControls();
     }
@@ -109,6 +119,7 @@ public partial class ClipWindow
     {
         populatingRecording = true;
         RecordingMic.IsChecked = settings.Recording.Microphone ?? settings.Microphone;
+        RecordingMicBoost.Value = settings.Recording.MicrophoneBoostDb ?? settings.MicrophoneBoostDb;
         RecordingCursor.IsChecked = settings.Recording.Cursor ?? settings.Cursor;
         UpdateRecordingDevices(recordingDevices);
         populatingRecording = false;
@@ -117,7 +128,7 @@ public partial class ClipWindow
         UpdateRecordingControls();
     }
 
-    private void RecordingOptionsChanged(object sender, Wpf.RoutedEventArgs e)
+    private void RecordingOptionsChanged(object? sender, EventArgs e)
     {
         if (populatingRecording) return;
         var options = settings.Recording;
@@ -132,15 +143,25 @@ public partial class ClipWindow
             Audio = RecordingAudio.IsChecked == true,
             Microphone = ReferenceEquals(sender, RecordingMic) ? RecordingMic.IsChecked : options.Microphone,
             MicrophoneDevice = ReferenceEquals(sender, RecordingMicDevice) ? (RecordingMicDevice.SelectedItem as AudioDevice)?.Id ?? "" : options.MicrophoneDevice,
+            MicrophoneBoostDb = ReferenceEquals(sender, RecordingMicBoost) ? (int)RecordingMicBoost.Value : options.MicrophoneBoostDb,
             Cursor = ReferenceEquals(sender, RecordingCursor) ? RecordingCursor.IsChecked : options.Cursor,
             Indicator = RecordingIndicator.IsChecked == true,
+            OverlayCorner = RecordingOverlayCorner.SelectedCorner,
             ShowTime = RecordingTime.IsChecked == true,
             Sounds = RecordingSounds.IsChecked == true,
             Timed = RecordingTimed.IsChecked == true,
             Minutes = TryRecordingMinutes(out int minutes) ? minutes : options.Minutes
         };
-        if (updated != options) SaveRecordingSettings(settings with { Recording = updated });
+        if (updated != options && !SaveRecordingSettings(settings with { Recording = updated }))
+        {
+            populatingRecording = true;
+            RecordingIndicator.IsChecked = options.Indicator;
+            RecordingOverlayCorner.SelectedCorner = options.OverlayCorner;
+            populatingRecording = false;
+        }
+        if (ReferenceEquals(sender, RecordingMicBoost)) UpdateMicTestMeter();
         UpdateRecordingControls();
+        UpdateOverlays();
     }
 
     private bool SaveRecordingSettings(Settings updated)
@@ -225,12 +246,34 @@ public partial class ClipWindow
                 _ = CheckRecordingDisk();
             }
         }
-        var options = settings.Recording;
-        string monitor = recordingActive ? recordingMonitor : options.SourceMonitor(settings.Monitor);
-        int seconds = options.Timed ? Math.Max(0, options.DurationSeconds - recordingSeconds) : recordingSeconds;
-        recordingOverlay.Update(settings.Overlay, recorder.Recording, settings.Monitor,
-            options.Indicator, recordingActive, recordingPaused, options.ShowTime ? FormatRecordingTime(seconds) : null, monitor);
+        UpdateOverlays();
     }
+
+    private void UpdateOverlays()
+    {
+        var options = settings.Recording;
+        var replayArea = settings.Overlay ? DisplayArea(settings.Monitor) : default;
+        System.Drawing.Rectangle recordingArea = default;
+        if (options.Indicator)
+        {
+            string windowToken = options.SourceWindow;
+            recordingArea = windowToken.Length == 0
+                ? DisplayArea(session.Busy ? recordingMonitor : options.SourceMonitor(settings.Monitor))
+                : AppTargets.WindowCaptureBounds(session.Busy ? recordingWindow : AppTargets.FindWindow(windowToken));
+        }
+        bool split = !replayArea.IsEmpty && !recordingArea.IsEmpty
+            && (replayArea != recordingArea || settings.OverlayCorner != options.OverlayCorner);
+        int seconds = options.Timed ? Math.Max(0, options.DurationSeconds - recordingSeconds) : recordingSeconds;
+        string? time = options.ShowTime ? FormatRecordingTime(seconds) : null;
+        separateRecordingOverlay.Update(false, false, split ? recordingArea : default, options.OverlayCorner,
+            split, recordingActive, recordingPaused, time);
+        recordingOverlay.Update(settings.Overlay, recorder.Recording, settings.Overlay ? replayArea : recordingArea,
+            settings.Overlay ? settings.OverlayCorner : options.OverlayCorner,
+            !split && !recordingArea.IsEmpty, recordingActive, recordingPaused, time);
+    }
+
+    private static System.Drawing.Rectangle DisplayArea(string monitor) =>
+        (Forms.Screen.AllScreens.FirstOrDefault(screen => screen.DeviceName == monitor) ?? Forms.Screen.PrimaryScreen)?.WorkingArea ?? default;
 
     private static string FormatRecordingTime(int seconds) => $"{seconds / 3600:00}:{seconds / 60 % 60:00}:{seconds % 60:00}";
 
@@ -261,7 +304,6 @@ public partial class ClipWindow
         RecordingQuality.Visibility = RecordingUseCapture.IsChecked == true ? Wpf.Visibility.Collapsed : Wpf.Visibility.Visible;
         RecordingDuration.Visibility = timed ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
         RecordingMinutes.ToolTip = invalidDuration ? "Enter a duration of at least one minute." : null;
-        RecordingMicDevice.IsEnabled = RecordingMic.IsChecked == true;
         RecordingGameLevel.Visibility = recordingActive && RecordingAudio.IsChecked == true ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
         RecordingMicLevel.Visibility = recordingActive && RecordingMic.IsChecked == true ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
         RecordingTimeRow.Visibility = RecordingIndicator.IsChecked == true ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
@@ -291,8 +333,8 @@ public partial class ClipWindow
                 recordingBytes = 0;
                 recordingMonitor = settings.Recording.SourceMonitor(settings.Monitor);
                 string windowToken = settings.Recording.SourceWindow;
-                if (windowToken.Length != 0 && AppTargets.FindWindow(windowToken) is var window && window != 0)
-                    recordingMonitor = Forms.Screen.FromHandle(window).DeviceName;
+                recordingWindow = windowToken.Length == 0 ? 0 : AppTargets.FindWindow(windowToken);
+                StopMicTest();
                 session.Start(settings);
                 RecordingStatus.Text = "Starting recording…";
             }

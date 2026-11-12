@@ -6,6 +6,7 @@ using System.Windows.Media;
 using Wpf = System.Windows;
 using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
+using Drawing = System.Drawing;
 
 namespace ClipIt;
 
@@ -52,10 +53,10 @@ internal sealed class RecordingOverlay : Wpf.Window
 
     internal void FlashSaved() => flashUntil = DateTime.UtcNow.AddSeconds(1.8);
 
-    internal void Update(bool enabled, bool recording, string monitor, bool captureEnabled = false, bool captureActive = false,
-        bool capturePaused = false, string? time = null, string captureMonitor = "")
+    internal void Update(bool enabled, bool recording, Drawing.Rectangle area, OverlayCorner corner = OverlayCorner.BottomRight,
+        bool captureEnabled = false, bool captureActive = false, bool capturePaused = false, string? time = null)
     {
-        if (!enabled && !captureEnabled) { if (IsVisible) Hide(); return; }
+        if ((!enabled && !captureEnabled) || area.Width <= 0 || area.Height <= 0) { if (IsVisible) Hide(); return; }
         // Apply capture exclusion while the native window is still hidden.
         if (handle == 0) new WindowInteropHelper(this).EnsureHandle();
         if (!excludedFromCapture) return;
@@ -72,14 +73,21 @@ internal sealed class RecordingOverlay : Wpf.Window
         layout.Measure(new Wpf.Size(double.PositiveInfinity, 22));
         Width = Math.Ceiling(layout.DesiredSize.Width);
         if (!IsVisible) Show();
-        var screen = System.Windows.Forms.Screen.AllScreens.FirstOrDefault(s => s.DeviceName == (enabled ? monitor : captureMonitor)) ?? System.Windows.Forms.Screen.PrimaryScreen!;
         // Screen rectangles are physical pixels; SetWindowPos avoids mixed-DPI coordinate errors.
-        var scale = System.Windows.PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice ?? Matrix.Identity;
+        var scale = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice ?? Matrix.Identity;
         int width = (int)Math.Round(Width * scale.M11), height = (int)Math.Round(Height * scale.M22);
-        var area = screen.WorkingArea;
-        // Align above the clock area rather than hugging the bottom-right screen corner.
-        int rightInset = (int)Math.Round(28 * scale.M11), bottomInset = (int)Math.Round(52 * scale.M22);
-        SetWindowPos(handle, new nint(-1), area.Right - width - rightInset, area.Bottom - height - bottomInset, width, height, 0x0010);
+        var origin = CornerOrigin(area, width, height, corner, (int)Math.Round(28 * scale.M11), (int)Math.Round(52 * scale.M22));
+        SetWindowPos(handle, new nint(-1), origin.X, origin.Y, width, height, 0x0010);
+    }
+
+    internal static Drawing.Point CornerOrigin(Drawing.Rectangle area, int width, int height, OverlayCorner corner,
+        int horizontalInset, int verticalInset)
+    {
+        horizontalInset = Math.Min(horizontalInset, Math.Max(0, (area.Width - width) / 2));
+        verticalInset = Math.Min(verticalInset, Math.Max(0, (area.Height - height) / 2));
+        return new(
+            corner is OverlayCorner.TopRight or OverlayCorner.BottomRight ? area.Right - width - horizontalInset : area.Left + horizontalInset,
+            corner is OverlayCorner.TopLeft or OverlayCorner.TopRight ? area.Top + verticalInset : area.Bottom - height - verticalInset);
     }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint hwnd, int index);

@@ -18,20 +18,53 @@
           </StackPanel>
         </Grid>
       </DataTemplate>
-      <Style x:Key="ClipCard" TargetType="ListBoxItem">
+      <Style x:Key="LibraryCard" TargetType="ListBoxItem">
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Stretch"/>
         <Setter Property="Foreground" Value="#EFF4FC"/><Setter Property="Padding" Value="12"/><Setter Property="Margin" Value="0,0,0,10"/>
         <Setter Property="Template">
           <Setter.Value>
             <ControlTemplate TargetType="ListBoxItem">
-              <Border x:Name="Card" Background="#121D2C" BorderBrush="#24354C" BorderThickness="1" CornerRadius="10" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border>
+              <Border x:Name="Card" Background="#121D2C" BorderBrush="#24354C" BorderThickness="1" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                <Grid>
+                  <ContentPresenter x:Name="CardContent"/>
+                  <StackPanel x:Name="DeleteStatus" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                    <Grid x:Name="DeleteSpinner" Width="28" Height="28" RenderTransformOrigin="0.5,0.5" HorizontalAlignment="Center">
+                      <Grid.RenderTransform><RotateTransform/></Grid.RenderTransform>
+                      <Ellipse Margin="2" Stroke="#657181" StrokeThickness="2"/>
+                      <Path Data="M 14,2 A 12,12 0 0 1 26,14" Stroke="#EFF4FC" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    </Grid>
+                    <TextBlock Text="Deleting…" Foreground="#EFF4FC" FontSize="12" FontWeight="SemiBold" Margin="0,6,0,0" HorizontalAlignment="Center"/>
+                  </StackPanel>
+                </Grid>
+              </Border>
               <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="#4D7CB8"/><Setter TargetName="Card" Property="Background" Value="#17273C"/></Trigger>
                 <Trigger Property="IsSelected" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="#4D8DFF"/></Trigger>
+                <Trigger Property="AutomationProperties.ItemStatus" Value="Deleting">
+                  <Setter TargetName="Card" Property="Background" Value="#21252C"/>
+                  <Setter TargetName="Card" Property="BorderBrush" Value="#39404A"/>
+                  <Setter TargetName="CardContent" Property="Opacity" Value="0.22"/>
+                  <Setter TargetName="DeleteStatus" Property="Visibility" Value="Visible"/>
+                  <Trigger.EnterActions>
+                    <BeginStoryboard x:Name="SpinWhileDeleting">
+                      <Storyboard>
+                        <DoubleAnimation Storyboard.TargetName="DeleteSpinner" Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" To="360" Duration="0:0:0.9" RepeatBehavior="Forever"/>
+                      </Storyboard>
+                    </BeginStoryboard>
+                  </Trigger.EnterActions>
+                  <Trigger.ExitActions><RemoveStoryboard BeginStoryboardName="SpinWhileDeleting"/></Trigger.ExitActions>
+                </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>
           </Setter.Value>
         </Setter>
+      </Style>
+      <Style x:Key="ClipCard" TargetType="ListBoxItem" BasedOn="{StaticResource LibraryCard}">
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding IsDeleting}" Value="True">
+            <Setter Property="AutomationProperties.ItemStatus" Value="Deleting"/>
+          </DataTrigger>
+        </Style.Triggers>
       </Style>
       <Style x:Key="TileCard" TargetType="ListBoxItem" BasedOn="{StaticResource ClipCard}">
         <Setter Property="Margin" Value="0"/><Setter Property="Padding" Value="8"/>
@@ -80,7 +113,7 @@
             </Grid>
           </DataTemplate></ListBox.ItemTemplate>
         </ListBox>
-        <ListBox x:Name="GamesList" Visibility="Collapsed" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ItemContainerStyle="{StaticResource ClipCard}" PreviewMouseLeftButtonUp="Game_Click" KeyDown="Game_Key" AutomationProperties.Name="Games">
+        <ListBox x:Name="GamesList" Visibility="Collapsed" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ItemContainerStyle="{StaticResource LibraryCard}" PreviewMouseLeftButtonUp="Game_Click" KeyDown="Game_Key" AutomationProperties.Name="Games">
           <ListBox.ItemTemplate><DataTemplate><Grid Margin="6,8">
             <Grid.ColumnDefinitions><ColumnDefinition Width="56"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons" FontSize="30" Foreground="#6EA6FF" VerticalAlignment="Center"/>

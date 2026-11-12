@@ -1,6 +1,7 @@
 <Window x:Class="ClipIt.ClipWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ClipIt"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="ClipIt 0.4" Width="1100" Height="940"
         WindowStartupLocation="CenterScreen" Background="#0B1019" Foreground="#EFF4FC"
@@ -191,13 +192,37 @@
                     <CheckBox x:Name="CursorToggle" Grid.Column="2" AutomationProperties.Name="Include mouse cursor"><StackPanel><TextBlock Text="Mouse cursor" FontSize="12"/><TextBlock Text="Show the pointer in clips" Style="{StaticResource MutedText}" FontSize="11" Margin="0,4,0,0"/></StackPanel></CheckBox>
                   </Grid>
                   <Grid Margin="0,15,0,0">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="154"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <ComboBox x:Name="MicrophoneBox" AutomationProperties.Name="Microphone device" ToolTip="Select a specific microphone, or follow the system default."/>
-                    <Button Grid.Column="1" Content="Refresh devices" Style="{StaticResource Quiet}" Click="RefreshMicrophones_Click" Margin="8,0,0,0" FontSize="11"/>
+                    <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                      <TextBlock Text="Boost Mic" FontSize="11"/>
+                      <TextBlock Text="{Binding Value, ElementName=MicrophoneBoost, StringFormat={}{0:+0;0;0} dB}" FontSize="11" HorizontalAlignment="Right" Foreground="#9DB8DB"/>
+                      <Slider x:Name="MicrophoneBoost" Grid.Row="1" Minimum="0" TickFrequency="1" SmallChange="1" LargeChange="3" IsSnapToTickEnabled="True" AutomationProperties.Name="Boost Mic in decibels" ToolTip="Increase the microphone level in new clips and recordings."/>
+                    </Grid>
+                    <Button x:Name="TestMicButton" Grid.Column="2" Content="Test Mic" Style="{StaticResource Quiet}" Click="TestMic_Click" Margin="12,0,0,0" FontSize="11"/>
                   </Grid>
+                  <StackPanel x:Name="MicTestPanel" Margin="0,12,0,0" Visibility="Collapsed">
+                    <ProgressBar x:Name="MicTestLevel" Minimum="-60" Maximum="0" Value="-60" Height="6" Foreground="#55D9AB" Background="#27364C" AutomationProperties.Name="Boosted microphone peak in dBFS"/>
+                    <TextBlock x:Name="MicTestStatus" Foreground="#9DB8DB" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                  </StackPanel>
                 </StackPanel>
               </Border>
               <Border x:Name="AudioNotice" Style="{StaticResource InlineNotice}"><TextBlock x:Name="AudioNoticeText" TextWrapping="Wrap" Foreground="#F5CCA0" FontSize="12"/></Border>
+              <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                <StackPanel>
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel Margin="0,0,24,0" VerticalAlignment="Center">
+                      <TextBlock Text="Instant Replay overlay" Style="{StaticResource CaptureSectionTitle}"/>
+                      <TextBlock Text="Shows replay status and flashes green when a clip is saved." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                    </StackPanel>
+                    <local:OverlayCornerPicker x:Name="CaptureOverlayCorner" Grid.Column="1" Margin="0,0,12,0" AutomationProperties.Name="Instant Replay overlay position"/>
+                    <CheckBox x:Name="OverlayToggle" Grid.Column="2" Width="44" AutomationProperties.Name="Instant Replay overlay"/>
+                  </Grid>
+                  <TextBlock x:Name="CaptureOverlayError" Visibility="Collapsed" Foreground="#F5CCA0" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                </StackPanel>
+              </Border>
               <Grid Margin="2,18,2,0"><TextBlock x:Name="LastClipLabel" Text="Your Clips stay on your PC. Ready whenever you are." Style="{StaticResource MutedText}" FontSize="11" TextTrimming="CharacterEllipsis"/></Grid>
             </StackPanel>
           </ScrollViewer>
@@ -248,7 +273,21 @@
                   <CheckBox x:Name="RecordingAudio" Content="Game or system audio" Style="{StaticResource RecordingOption}" Margin="0,0,0,10"/>
                   <ProgressBar x:Name="RecordingGameLevel" Height="5" Maximum="100" Foreground="#55D9AB" Background="#27364C" Margin="0,0,0,10" Visibility="Collapsed" AutomationProperties.Name="Game or system audio level"/>
                   <CheckBox x:Name="RecordingMic" Content="Microphone" Style="{StaticResource RecordingOption}" Margin="0,0,0,10"/>
-                  <ComboBox x:Name="RecordingMicDevice" AutomationProperties.Name="Recording microphone device" Margin="0,0,0,12"/>
+                  <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="154"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <ComboBox x:Name="RecordingMicDevice" AutomationProperties.Name="Recording microphone device"/>
+                    <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                      <TextBlock Text="Boost Mic" FontSize="11"/>
+                      <TextBlock Text="{Binding Value, ElementName=RecordingMicBoost, StringFormat={}{0:+0;0;0} dB}" FontSize="11" HorizontalAlignment="Right" Foreground="#9DB8DB"/>
+                      <Slider x:Name="RecordingMicBoost" Grid.Row="1" Minimum="0" TickFrequency="1" SmallChange="1" LargeChange="3" IsSnapToTickEnabled="True" AutomationProperties.Name="Recording mic boost in decibels" ToolTip="Set microphone boost for future recordings. Uses the Capture value until adjusted."/>
+                    </Grid>
+                    <Button x:Name="RecordingTestMicButton" Grid.Column="2" Content="Test Mic" Style="{StaticResource Quiet}" Click="TestMic_Click" Margin="12,0,0,0" FontSize="11"/>
+                  </Grid>
+                  <StackPanel x:Name="RecordingMicTestPanel" Margin="0,0,0,12" Visibility="Collapsed">
+                    <ProgressBar x:Name="RecordingMicTestLevel" Minimum="-60" Maximum="0" Value="-60" Height="6" Foreground="#55D9AB" Background="#27364C" AutomationProperties.Name="Boosted recording microphone peak in dBFS"/>
+                    <TextBlock x:Name="RecordingMicTestStatus" Foreground="#9DB8DB" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                  </StackPanel>
                   <ProgressBar x:Name="RecordingMicLevel" Height="5" Maximum="100" Foreground="#55D9AB" Background="#27364C" Margin="0,0,0,10" Visibility="Collapsed" AutomationProperties.Name="Microphone level"/>
                   <CheckBox x:Name="RecordingCursor" Content="Record cursor" Style="{StaticResource RecordingOption}"/>
                 </StackPanel>
@@ -261,7 +300,12 @@
                   <TextBox x:Name="RecordingShortcutBox" DockPanel.Dock="Right" Width="230" IsReadOnly="True" TextAlignment="Center" FontWeight="SemiBold" Foreground="#A9CCFF" PreviewMouseLeftButtonDown="Shortcut_Click" PreviewKeyDown="Shortcut_KeyDown" GotKeyboardFocus="Shortcut_Focused" LostKeyboardFocus="Shortcut_Blurred" AutomationProperties.Name="Start or stop recording shortcut"/>
                   <TextBlock Text="Start / stop shortcut" Style="{StaticResource FieldLabel}" Margin="0" VerticalAlignment="Center"/>
                 </DockPanel>
-                <CheckBox x:Name="RecordingIndicator" Content="Recording indicator" Style="{StaticResource RecordingOption}" Margin="0,0,0,10"/>
+                <Grid Margin="0,0,0,10">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <TextBlock Text="Recording indicator" Style="{StaticResource FieldLabel}" Margin="0" VerticalAlignment="Center"/>
+                  <local:OverlayCornerPicker x:Name="RecordingOverlayCorner" Grid.Column="1" Margin="0,0,12,0" AutomationProperties.Name="Recording overlay position"/>
+                  <CheckBox x:Name="RecordingIndicator" Grid.Column="2" Width="44" AutomationProperties.Name="Recording indicator"/>
+                </Grid>
                 <Grid x:Name="RecordingTimeRow" Margin="20,4,0,16" Visibility="Collapsed"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Margin="0,0,24,0"><TextBlock Text="Show recording time" FontSize="13"/><TextBlock Text="Include the timer in the recording indicator." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel><CheckBox x:Name="RecordingTime" Grid.Column="1" Width="44" AutomationProperties.Name="Show recording time"/></Grid>
                 <CheckBox x:Name="RecordingSounds" Content="Start and stop sounds" Style="{StaticResource RecordingOption}" Margin="0,0,0,10"/>
                 <CheckBox x:Name="RecordingTimed" Content="Timed Recording" Style="{StaticResource RecordingOption}"/>
@@ -312,16 +356,6 @@
                   <StackPanel Margin="0,0,24,0"><TextBlock Text="Start minimized" FontSize="13"/><TextBlock Text="Keep ClipIt in the system tray when Windows starts." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
                   <CheckBox x:Name="StartMinimizedToggle" Grid.Column="1" Width="44" AutomationProperties.Name="Start minimized"/>
                 </Grid>
-              </StackPanel>
-            </Border>
-            <Border Style="{StaticResource Card}" Margin="0,0,0,16">
-              <StackPanel>
-                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                  <StackPanel Margin="0,0,24,0"><TextBlock Text="Instant Replay overlay" FontSize="13"/><TextBlock Text="Show replay status in the bottom-right corner of the capture display." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
-                  <CheckBox x:Name="OverlayToggle" Grid.Column="1" Width="44" AutomationProperties.Name="Overlay"/>
-                </Grid>
-                <TextBlock Text="A check means recording; an X means capture is inactive. Flashes green when a clip is saved." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,18,0,0"/>
-                <TextBlock Text="Works over desktop and borderless apps. Some fullscreen games may hide it." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
               </StackPanel>
             </Border>
             <Border Style="{StaticResource Card}">

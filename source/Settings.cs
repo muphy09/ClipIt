@@ -17,12 +17,15 @@ public sealed record Settings
         (long)Math.Ceiling((videoMbps + .192 * 4) * 1_000_000 / 8 * seconds * 1.01); // Four AAC tracks and container overhead.
     public bool Microphone { get; init; }
     public string MicrophoneDevice { get; init; } = "default";
+    public const int MaximumMicrophoneBoostDb = 18;
+    public int MicrophoneBoostDb { get; init; }
     public string GameWindow { get; init; } = "auto";
     public string DiscordExecutable { get; init; } = "Discord.exe";
     public bool Cursor { get; init; } = true;
     public bool StartWithWindows { get; init; }
     public bool StartMinimized { get; init; }
     public bool Overlay { get; init; } = true;
+    public OverlayCorner OverlayCorner { get; init; } = OverlayCorner.BottomRight;
     public bool BufferInMemory { get; init; }
     public string RecordingFolder { get; init; } = "";
     internal string RecordingsPath => RecordingFolder.Length == 0 ? Path.Combine(Folder, "Recordings") : RecordingFolder;
@@ -59,6 +62,9 @@ public sealed record Settings
     {
         if (!Path.IsPathFullyQualified(Folder)) throw new ArgumentException("Choose an absolute save folder.");
         if (!Path.IsPathFullyQualified(RecordingsPath)) throw new ArgumentException("Choose an absolute recording folder.");
+        if (MicrophoneBoostDb is < 0 or > MaximumMicrophoneBoostDb
+            || Recording.MicrophoneBoostDb is < 0 or > MaximumMicrophoneBoostDb)
+            throw new ArgumentException("Microphone boost must be between 0 and 18 dB.");
         if (Height < 2 || Height > 32768 || Height % 2 != 0 || Fps is not (30 or 60) || Bitrate < 5000 || Bitrate > 100000)
             throw new ArgumentException("Invalid recording quality settings.");
         if (Key < 1 || Key > 254 || Modifiers > 15 || (Modifiers & 3) == 0)

@@ -14,11 +14,14 @@ internal static class AppTargets
 {
     private delegate bool EnumWindow(nint hwnd, nint data);
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct Point { public int X, Y; }
     [DllImport("user32")] private static extern bool EnumWindows(EnumWindow callback, nint data);
     [DllImport("user32")] private static extern nint GetForegroundWindow();
     [DllImport("user32")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32")] private static extern bool GetWindowRect(nint window, out Rect rectangle);
     [DllImport("user32")] private static extern bool GetClientRect(nint window, out Rect rectangle);
+    [DllImport("user32")] private static extern bool ClientToScreen(nint window, ref Point point);
+    [DllImport("user32")] private static extern bool IsIconic(nint window);
     [DllImport("user32")] private static extern uint GetWindowThreadProcessId(nint window, out uint pid);
     [DllImport("user32", CharSet=CharSet.Unicode)] private static extern int GetWindowText(nint window, StringBuilder text, int length);
     [DllImport("user32", CharSet=CharSet.Unicode)] private static extern int GetClassName(nint window, StringBuilder text, int length);
@@ -87,6 +90,14 @@ internal static class AppTargets
     internal static bool HasWindow(nint window) => GetWindowThreadProcessId(window, out _) != 0;
     internal static (int Width, int Height) WindowSize(nint window) =>
         GetClientRect(window, out var bounds) ? (bounds.Right, bounds.Bottom) : (0, 0);
+    internal static System.Drawing.Rectangle WindowCaptureBounds(nint window)
+    {
+        Point origin = default;
+        if (window == 0 || !IsWindowVisible(window) || IsIconic(window)
+            || !GetClientRect(window, out var bounds) || !ClientToScreen(window, ref origin))
+            return System.Drawing.Rectangle.Empty;
+        return new(origin.X, origin.Y, bounds.Right, bounds.Bottom);
+    }
     public static CaptureApp? FullscreenGame(string monitor = "")
     {
         var window = GetForegroundWindow();

@@ -60,6 +60,10 @@ internal static class DesktopChecks
                     exit = 0;
                     return;
                 }
+                window = new ClipWindow { ShowInTaskbar = false };
+                app.MainWindow = window;
+                new WindowInteropHelper(window).EnsureHandle();
+                VerifyOverlays(window);
                 string registryPath = @"Software\ClipIt.Checks." + Guid.NewGuid().ToString("N");
                 try
                 {
@@ -72,9 +76,6 @@ internal static class DesktopChecks
                 }
                 finally { Registry.CurrentUser.DeleteSubKeyTree(registryPath, throwOnMissingSubKey: false); }
 
-                window = new ClipWindow { ShowInTaskbar = false };
-                app.MainWindow = window;
-                new WindowInteropHelper(window).EnsureHandle();
                 var formatted = PatchNotesWindow.FormatNotes("## [v0.5.7]\n\n### Bugfixes\n\n- example\n- Another fix\n  continued\n\n## [v0.5.6]\n\nEarlier changes.");
                 var noteBlocks = formatted.Blocks.ToArray();
                 Require(noteBlocks.Length == 5 && noteBlocks[0] is System.Windows.Documents.Paragraph version && new System.Windows.Documents.TextRange(version.ContentStart, version.ContentEnd).Text.Trim() == "[v0.5.7]" && version.FontSize > ((System.Windows.Documents.Paragraph)noteBlocks[1]).FontSize, "Patch notes render version and section headings at distinct sizes");
@@ -124,6 +125,20 @@ internal static class DesktopChecks
                 bitrate.Text = "24"; replayLength.SelectedIndex = 0;
                 ((C.Button)window.FindName("ApplyButton")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
                 Require(Settings.Load().ReplaySeconds == 30 && estimate.Text == shortEstimate, "Replay length and estimate return to the thirty-second configuration");
+                var micBoost = (C.Slider)window.FindName("MicrophoneBoost");
+                var recordingBoost = (C.Slider)window.FindName("RecordingMicBoost");
+                Require(micBoost.Value == 0 && recordingBoost.Value == 0, "Existing profiles start with no microphone boost");
+                micBoost.Value = 9;
+                Require(Settings.Load().MicrophoneBoostDb == 0 && pendingBar.Visibility == Wpf.Visibility.Visible,
+                    "Capture mic boost is pending until Apply");
+                ((C.Button)window.FindName("ApplyButton")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                Require(Settings.Load().MicrophoneBoostDb == 9 && recordingBoost.Value == 9
+                    && Settings.Load().Recording.MicrophoneBoostDb == null, "Recording inherits the applied Capture mic boost");
+                recordingBoost.Value = 3;
+                micBoost.Value = 0;
+                ((C.Button)window.FindName("ApplyButton")).RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                Require(Settings.Load().MicrophoneBoostDb == 0 && Settings.Load().Recording.MicrophoneBoostDb == 3 && recordingBoost.Value == 3,
+                    "An explicit Recording mic boost persists independently of Capture");
                 string portalRoot = Path.Combine(data, "portal");
                 string portalGame = Path.Combine(portalRoot, "myGAME", "Highlights");
                 Directory.CreateDirectory(portalGame);
@@ -449,19 +464,6 @@ internal static class DesktopChecks
                     finally { tileWindow.Close(); }
                 }
 
-                var overlay = new RecordingOverlay();
-                try
-                {
-                    overlay.Update(true, false, "");
-                    nint hwnd = new WindowInteropHelper(overlay).Handle;
-                    long styles = GetWindowLongPtr(hwnd, -20);
-                    Require(overlay.IsVisible && !overlay.ShowInTaskbar && !overlay.ShowActivated && (styles & 0x080000A0) == 0x080000A0, "Overlay is visible, click-through, non-activating and absent from taskbar");
-                    Require(GetWindowDisplayAffinity(hwnd, out uint affinity) && affinity == 0x11, "Overlay is excluded from Windows capture");
-                    overlay.Update(false, false, "");
-                    Require(!overlay.IsVisible, "Turning overlay off hides its window");
-                }
-                finally { overlay.Close(); }
-
                 var previewHost = (C.Border)window.FindName("LibraryHost");
                 var previousLibrary = previewHost.Child;
                 previewHost.Child = editor;
@@ -636,6 +638,79 @@ internal static class DesktopChecks
                 app.Shutdown();
             }
 
+            void VerifyOverlays(ClipWindow window)
+            {
+                var replayCorner = (OverlayCornerPicker)window.FindName("CaptureOverlayCorner");
+                var recordingCorner = (OverlayCornerPicker)window.FindName("RecordingOverlayCorner");
+                var replayToggle = (C.CheckBox)window.FindName("OverlayToggle");
+                var recordingToggle = (C.CheckBox)window.FindName("RecordingIndicator");
+                Require(replayCorner.SelectedCorner == OverlayCorner.BottomRight && recordingCorner.SelectedCorner == OverlayCorner.BottomRight,
+                    "Both overlay pickers default to bottom right");
+                replayToggle.IsChecked = false;
+                ((C.RadioButton)replayCorner.FindName("TopRight")).IsChecked = true;
+                ((C.RadioButton)recordingCorner.FindName("TopLeft")).IsChecked = true;
+                var overlaySettings = Settings.Load();
+                Require(!overlaySettings.Overlay && overlaySettings.OverlayCorner == OverlayCorner.TopRight
+                    && !overlaySettings.Recording.Indicator && overlaySettings.Recording.OverlayCorner == OverlayCorner.TopLeft
+                    && ((Wpf.FrameworkElement)window.FindName("PendingSettingsBar")).Visibility == Wpf.Visibility.Collapsed,
+                    "Overlay corners save independently even while disabled without requiring Apply");
+
+                replayToggle.IsChecked = true;
+                recordingToggle.IsChecked = true;
+                var replayOverlay = (RecordingOverlay)typeof(ClipWindow).GetField("recordingOverlay", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+                var otherOverlay = (RecordingOverlay)typeof(ClipWindow).GetField("separateRecordingOverlay", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+                Require(replayOverlay.IsVisible && otherOverlay.IsVisible, "Different corners show both overlays independently");
+                ((C.RadioButton)recordingCorner.FindName("TopRight")).IsChecked = true;
+                Require(replayOverlay.IsVisible && !otherOverlay.IsVisible, "Overlays sharing a source and corner sit side by side");
+                recordingToggle.IsChecked = false;
+                ((C.RadioButton)replayCorner.FindName("BottomRight")).IsChecked = true;
+                ((C.RadioButton)recordingCorner.FindName("BottomRight")).IsChecked = true;
+
+                var overlay = new RecordingOverlay();
+                try
+                {
+                    var area = Screen.PrimaryScreen!.WorkingArea;
+                    overlay.Update(true, false, area);
+                    nint hwnd = new WindowInteropHelper(overlay).Handle;
+                    long styles = GetWindowLongPtr(hwnd, -20);
+                    Require(overlay.IsVisible && !overlay.ShowInTaskbar && !overlay.ShowActivated && (styles & 0x080000A0) == 0x080000A0, "Overlay is visible, click-through, non-activating and absent from taskbar");
+                    Require(GetWindowDisplayAffinity(hwnd, out uint affinity) && affinity == 0x11, "Overlay is excluded from Windows capture");
+                    Require(GetWindowRect(hwnd, out var bottomRight), "Read bottom-right overlay bounds");
+                    int horizontalInset = area.Right - bottomRight.Right;
+                    int bottomInset = area.Bottom - bottomRight.Bottom;
+                    foreach (var corner in Enum.GetValues<OverlayCorner>())
+                    {
+                        overlay.Update(true, false, area, corner);
+                        bool right = corner is OverlayCorner.TopRight or OverlayCorner.BottomRight;
+                        bool top = corner is OverlayCorner.TopLeft or OverlayCorner.TopRight;
+                        Require(GetWindowRect(hwnd, out var rect)
+                            && (right ? area.Right - rect.Right : rect.Left - area.Left) == horizontalInset
+                            && (top ? rect.Top - area.Top : area.Bottom - rect.Bottom) == bottomInset
+                            && horizontalInset > 0 && bottomInset > 0, $"Overlay uses matching insets at {corner}");
+                    }
+                    var target = new Wpf.Window { Width = 360, Height = 260, ShowInTaskbar = false, ShowActivated = false };
+                    try
+                    {
+                        target.Show();
+                        nint targetHandle = new WindowInteropHelper(target).Handle;
+                        foreach (int offset in new[] { 30, 70 })
+                        {
+                            Require(SetWindowPos(targetHandle, 0, area.Left + offset, area.Top + offset, 360, 260, 0x0014),
+                                "Move the test capture window");
+                            var client = AppTargets.WindowCaptureBounds(targetHandle);
+                            overlay.Update(false, false, client, OverlayCorner.TopRight, captureEnabled: true, time: "00:00:30");
+                            Require(!client.IsEmpty && GetWindowRect(hwnd, out var rect)
+                                && client.Right - rect.Right == horizontalInset && rect.Top - client.Top == bottomInset,
+                                "The recording indicator follows the selected window's client area");
+                        }
+                    }
+                    finally { target.Close(); }
+                    overlay.Update(false, false, default);
+                    Require(!overlay.IsVisible, "Turning overlay off hides its window");
+                }
+                finally { overlay.Close(); }
+            }
+
             async Task VerifyRecording(ClipWindow window)
             {
                 var supervisor = (Supervisor)typeof(ClipWindow).GetField("recorder", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
@@ -663,6 +738,19 @@ internal static class DesktopChecks
                     "Enabling Timed Recording reveals and saves the duration option");
 
                 ((C.CheckBox)window.FindName("RecordingIndicator")).IsChecked = true;
+                ((C.CheckBox)window.FindName("RecordingMic")).IsChecked = true;
+                ((C.Slider)window.FindName("RecordingMicBoost")).Value = 9;
+                var testMic = (C.Button)window.FindName("RecordingTestMicButton");
+                var testPanel = (Wpf.FrameworkElement)window.FindName("RecordingMicTestPanel");
+                var testStatus = (C.TextBlock)window.FindName("RecordingMicTestStatus");
+                testMic.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                window.UpdateLayout();
+                Require(testPanel.IsVisible && Equals(testMic.Content, "Stop Test"), "Recording Test Mic opens the live meter");
+                for (int i = 0; i < 40 && testStatus.Text == "Connecting to microphone…"; i++) await Task.Delay(100);
+                Require(testStatus.Text.StartsWith("Peak ") || testStatus.Text.StartsWith("Clipping")
+                    || testStatus.Text.StartsWith("No audio received"), "The microphone test reports levels or unavailable input without starting a recording");
+                testMic.RaiseEvent(new Wpf.RoutedEventArgs(C.Button.ClickEvent));
+                Require(!testPanel.IsVisible && Equals(testMic.Content, "Test Mic"), "Stop Test closes the live meter");
                 var liveOverlay = (RecordingOverlay)typeof(ClipWindow).GetField("recordingOverlay", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
                 var overlayTimer = (C.TextBlock)typeof(RecordingOverlay).GetField("captureTime", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(liveOverlay)!;
                 var captureScreen = Screen.AllScreens.FirstOrDefault(s => s.DeviceName == Settings.Load().Monitor) ?? Screen.PrimaryScreen!;

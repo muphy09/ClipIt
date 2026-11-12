@@ -140,6 +140,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
                     || item.Application != game || item.IsLinked != isLinked || item.IsRecording != isRecording)
                     item = new ClipItem(f.FullName, stamp, game, favorite, isLinked, isRecording);
                 else item.IsFavorite = favorite;
+                item.SetDeleting(deleting.Contains(item.Path));
                 next.Add(item.Path, item);
             }
             items.Clear();
@@ -165,7 +166,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         bool byGame = ByGameTab.IsChecked == true;
         var ordered = collection.OrderByDescending(c => c.Stamp.Modified).ThenBy(c => c.Path, StringComparer.OrdinalIgnoreCase).ToArray();
         var games = ordered.GroupBy(c => c.Application, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new GameFolder(g.Key, g.Count())).OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+            .Select(g => new GameFolder(g.Key, g.Count(), g.Sum(c => c.Stamp.Size))).OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ToArray();
         bool folders = byGame && selectedGame == null;
         ViewSwitch.Visibility = folders ? Wpf.Visibility.Collapsed : Wpf.Visibility.Visible;
         GamesList.ItemsSource = games;
@@ -233,7 +234,18 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         if (e.Key == Key.Enter && GamesList.SelectedItem is GameFolder game) { OpenGame(game.Name); e.Handled = true; }
     }
     private void OpenGame(string name) { selectedGame = name; UpdateView(); }
-    private sealed record GameFolder(string Name, int Count) { public string Detail => $"{Count} {(Count == 1 ? "clip" : "clips")}"; }
+    private sealed record GameFolder(string Name, int Count, long Bytes)
+    {
+        public string Detail => $"{Count} {(Count == 1 ? "clip" : "clips")} ({FormatSize(Bytes)})";
+
+        private static string FormatSize(long bytes) => bytes switch
+        {
+            >= 1L << 30 => $"{bytes / (double)(1L << 30):0.00} GB",
+            >= 1L << 20 => $"{bytes / (double)(1L << 20):0.##} MB",
+            >= 1L << 10 => $"{bytes / (double)(1L << 10):0.##} KB",
+            _ => $"{bytes} B"
+        };
+    }
 
     private void Clip_RightClick(object sender, MouseButtonEventArgs e)
     {
@@ -252,7 +264,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private ClipItem? MenuClip => ClipsList.ContextMenu.Tag as ClipItem;
     private void Copy_Click(object sender, Wpf.RoutedEventArgs e)
     {
-        if (MenuClip is not ClipItem item) return;
+        if (MenuClip is not ClipItem item || deleting.Contains(item.Path)) return;
         try
         {
             if (!File.Exists(item.Path)) throw new IOException("This clip is no longer available.");
@@ -263,9 +275,11 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     }
     private async void Delete_Click(object sender, Wpf.RoutedEventArgs e)
     {
-        if (MenuClip is not ClipItem { IsLinked: false } item || Editor.Busy || !deleting.Add(item.Path)) return;
+        if (MenuClip is not ClipItem { IsLinked: false } selected || Editor.Busy
+            || !items.TryGetValue(selected.Path, out var item) || item.IsLinked || !deleting.Add(item.Path)) return;
         try
         {
+            item.SetDeleting(true);
             if (item.PreviewTask is { IsCompleted: false } preview)
             {
                 item.PreviewCancellation?.Cancel();
@@ -285,8 +299,13 @@ public partial class ClipLibrary : C.UserControl, IDisposable
             UpdateView();
             LibraryMessage.Text = "Clip moved to the Recycle Bin.";
         }
-        catch (Exception ex) { LibraryMessage.Text = "Could not delete clip: " + ex.Message; }
-        finally { deleting.Remove(item.Path); Refresh(); }
+        catch (Exception ex) { if (!disposed) LibraryMessage.Text = "Could not delete clip: " + ex.Message; }
+        finally
+        {
+            deleting.Remove(item.Path);
+            if (!disposed && items.TryGetValue(item.Path, out var remaining)) remaining.SetDeleting(false);
+            Refresh();
+        }
     }
     private void Thumbnail_Loaded(object sender, Wpf.RoutedEventArgs e)
     {
@@ -368,7 +387,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
     private void Clip_MouseDown(object sender, MouseButtonEventArgs e) { dragStart = e.GetPosition(this); mouseClip = ItemAt(e.OriginalSource); dragged = false; }
     private void Clip_MouseMove(object sender, MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed || mouseClip == null || dragged) return;
+        if (e.LeftButton != MouseButtonState.Pressed || mouseClip == null || dragged || deleting.Contains(mouseClip.Path)) return;
         var p = e.GetPosition(this);
         if (Math.Abs(p.X - dragStart.X) < Wpf.SystemParameters.MinimumHorizontalDragDistance && Math.Abs(p.Y - dragStart.Y) < Wpf.SystemParameters.MinimumVerticalDragDistance) return;
         dragged = true;
@@ -463,6 +482,7 @@ public partial class ClipLibrary : C.UserControl, IDisposable
         public ClipStamp Stamp { get; }
         public string Application { get; }
         public bool IsFavorite { get; set; }
+        public bool IsDeleting { get; private set; }
         public bool IsLinked { get; }
         public bool IsRecording { get; }
         public string Title { get; }
@@ -485,6 +505,12 @@ public partial class ClipLibrary : C.UserControl, IDisposable
             Detail = MediaTools.Gigabytes(stamp.Size);
         }
         public void SetThumbnail(BitmapImage image) { Thumbnail = image; PropertyChanged?.Invoke(this, new(nameof(Thumbnail))); }
+        public void SetDeleting(bool value)
+        {
+            if (IsDeleting == value) return;
+            IsDeleting = value;
+            PropertyChanged?.Invoke(this, new(nameof(IsDeleting)));
+        }
         public void SetDetails(ClipPreviewInfo info)
         {
             DetailsLoaded = true;

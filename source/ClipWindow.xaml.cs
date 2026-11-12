@@ -34,6 +34,7 @@ public partial class ClipWindow : Wpf.Window
     private PatchNotesWindow? patchNotes;
     private readonly AppUpdates updates = new();
     private readonly RecordingOverlay recordingOverlay = new();
+    private readonly RecordingOverlay separateRecordingOverlay = new();
     private readonly CaptureChime captureChime = new();
     private int driveCheckGeneration;
     private string captureBaseline = "";
@@ -62,12 +63,16 @@ public partial class ClipWindow : Wpf.Window
         StartWindowsToggle.IsEnabled = StartupRegistration.Available;
         StartupHint.Text = StartupRegistration.Available ? "Open ClipIt automatically when you sign in." : "Available in the installed app. Development instances stay separate.";
         OverlayToggle.IsChecked = settings.Overlay;
+        CaptureOverlayCorner.SelectedCorner = settings.OverlayCorner;
         RamBufferToggle.IsChecked = settings.BufferInMemory;
         StartWindowsToggle.Checked += GeneralSetting_Changed; StartWindowsToggle.Unchecked += GeneralSetting_Changed;
         StartMinimizedToggle.Checked += GeneralSetting_Changed; StartMinimizedToggle.Unchecked += GeneralSetting_Changed;
-        OverlayToggle.Checked += GeneralSetting_Changed; OverlayToggle.Unchecked += GeneralSetting_Changed;
+        OverlayToggle.Checked += (_, _) => SaveCaptureOverlay();
+        OverlayToggle.Unchecked += (_, _) => SaveCaptureOverlay();
+        CaptureOverlayCorner.CornerChanged += (_, _) => SaveCaptureOverlay();
         RamBufferToggle.Checked += GeneralSetting_Changed; RamBufferToggle.Unchecked += GeneralSetting_Changed;
         recorder = new(settings);
+        MicrophoneBoost.Maximum = RecordingMicBoost.Maximum = Settings.MaximumMicrophoneBoostDb;
         InitializeRecording();
         FolderBox.Text = settings.Folder;
         PortalFolderBox.Text = settings.PortalFolder;
@@ -94,7 +99,7 @@ public partial class ClipWindow : Wpf.Window
         MicToggle.IsChecked = settings.Microphone; CursorToggle.IsChecked = settings.Cursor;
         MicrophoneBox.Items.Add(new AudioDevice(settings.MicrophoneDevice, settings.MicrophoneDevice == "default" ? "System default microphone" : "Saved microphone · checking devices…"));
         MicrophoneBox.SelectedIndex = 0;
-        MicrophoneBox.IsEnabled = settings.Microphone;
+        MicrophoneBoost.Value = settings.MicrophoneBoostDb;
         RefreshGameApps();
 
         FolderBox.TextChanged += (_, _) => MarkDirty(NoticeArea.Location);
@@ -103,9 +108,16 @@ public partial class ClipWindow : Wpf.Window
         MonitorBox.SelectionChanged += (_, _) => { if (populating) return; RefreshResolutions(SelectedHeight); SuggestBitrate(); MarkDirty(); };
         QualityBox.SelectionChanged += (_, _) => { SuggestBitrate(); MarkDirty(); };
         FpsBox.SelectionChanged += (_, _) => { SuggestBitrate(); MarkDirty(); };
-        MicToggle.Checked += (_, _) => { MicrophoneBox.IsEnabled = true; MarkDirty(NoticeArea.Audio); };
-        MicToggle.Unchecked += (_, _) => { MicrophoneBox.IsEnabled = false; MarkDirty(NoticeArea.Audio); };
-        MicrophoneBox.SelectionChanged += (_, _) => MarkDirty(NoticeArea.Audio);
+        MicToggle.Checked += (_, _) => MarkDirty(NoticeArea.Audio);
+        MicToggle.Unchecked += (_, _) => MarkDirty(NoticeArea.Audio);
+        MicrophoneBox.SelectionChanged += (_, _) =>
+        {
+            if (populating) return;
+            MarkDirty(NoticeArea.Audio);
+            if (micTest?.ForRecording == false) StartMicTest(forRecording: false);
+        };
+        MicrophoneBox.DropDownOpened += (_, _) => recorder.RefreshMicrophones();
+        MicrophoneBoost.ValueChanged += (_, _) => { MarkDirty(NoticeArea.Audio); UpdateMicTestMeter(); };
         GameAppBox.SelectionChanged += (_, _) => MarkDirty(NoticeArea.Application);
         CursorToggle.Checked += (_, _) => MarkDirty(NoticeArea.Audio); CursorToggle.Unchecked += (_, _) => MarkDirty(NoticeArea.Audio);
         populating = false;
@@ -158,6 +170,9 @@ public partial class ClipWindow : Wpf.Window
         SizeChanged += (_, _) => UpdateBuffer();
         Wpf.Application.Current.SessionEnding += (_, _) => { quitting = true; Cleanup(); };
         IsVisibleChanged += (_, _) => { if (!IsVisible) library?.PausePlayback(); };
+        CapturePanel.IsVisibleChanged += (_, _) => { if (!CapturePanel.IsVisible) StopMicTest(); };
+        RecordingPanel.IsVisibleChanged += (_, _) => { if (!RecordingPanel.IsVisible) StopMicTest(); };
+        StateChanged += (_, _) => { if (WindowState == Wpf.WindowState.Minimized) StopMicTest(); };
     }
 
     private void Tick()
@@ -231,13 +246,7 @@ public partial class ClipWindow : Wpf.Window
         {
             case "application": GameCaptureStatus.Text = message.Text; break;
             case "microphones":
-                var devices = JsonSerializer.Deserialize<List<AudioDevice>>(message.Text) ?? [];
-                UpdateRecordingDevices(devices);
-                string selected = (MicrophoneBox.SelectedItem as AudioDevice)?.Id ?? settings.MicrophoneDevice;
-                if (devices.All(d => d.Id != selected)) devices.Add(new(selected, "Unavailable microphone · saved selection"));
-                bool wasPopulating = populating; populating = true;
-                MicrophoneBox.Items.Clear(); foreach (var device in devices) MicrophoneBox.Items.Add(device);
-                MicrophoneBox.SelectedItem = devices.First(d => d.Id == selected); populating = wasPopulating;
+                UpdateMicrophoneDevices(JsonSerializer.Deserialize<List<AudioDevice>>(message.Text) ?? []);
                 break;
             case "started":
                 MonitorBox.ToolTip = message.Text;
@@ -265,6 +274,20 @@ public partial class ClipWindow : Wpf.Window
         }
     }
 
+    private void UpdateMicrophoneDevices(List<AudioDevice> devices)
+    {
+        if (!recordingDevices.SequenceEqual(devices)) UpdateRecordingDevices(devices);
+        string selected = (MicrophoneBox.SelectedItem as AudioDevice)?.Id ?? settings.MicrophoneDevice;
+        var available = devices.ToList();
+        if (available.All(d => d.Id != selected)) available.Add(new(selected, "Unavailable microphone · saved selection"));
+        if (MicrophoneBox.Items.Cast<AudioDevice>().SequenceEqual(available)) return;
+        bool wasPopulating = populating; populating = true;
+        MicrophoneBox.Items.Clear();
+        foreach (var device in available) MicrophoneBox.Items.Add(device);
+        MicrophoneBox.SelectedItem = available.First(d => d.Id == selected);
+        populating = wasPopulating;
+    }
+
     private string CaptureSelection() => JsonSerializer.Serialize(new
     {
         Folder = FolderBox.Text.Trim().TrimEnd(Path.DirectorySeparatorChar).ToUpperInvariant(),
@@ -273,6 +296,7 @@ public partial class ClipWindow : Wpf.Window
         Bitrate = double.TryParse(BitrateBox.Text, NumberStyles.Number, CultureInfo.InvariantCulture, out double mbps) && double.IsFinite(mbps) ? mbps.ToString("0.###", CultureInfo.InvariantCulture) : BitrateBox.Text.Trim(),
         Microphone = MicToggle.IsChecked, Cursor = CursorToggle.IsChecked,
         Device = (MicrophoneBox.SelectedItem as AudioDevice)?.Id,
+        Boost = (int)MicrophoneBoost.Value,
         Game = (GameAppBox.SelectedItem as CaptureApp)?.Token
     });
     private void MarkDirty(NoticeArea area = NoticeArea.Quality)
@@ -296,7 +320,7 @@ public partial class ClipWindow : Wpf.Window
         {
             if (storageChanged && (recorder.Saving || library?.Busy == true)) throw new InvalidOperationException("Wait for your clip to finish saving before changing replay storage.");
             var updated = settings with { StartWithWindows = StartWindowsToggle.IsChecked == true,
-                StartMinimized = StartMinimizedToggle.IsChecked == true, Overlay = OverlayToggle.IsChecked == true, BufferInMemory = RamBufferToggle.IsChecked == true };
+                StartMinimized = StartMinimizedToggle.IsChecked == true, BufferInMemory = RamBufferToggle.IsChecked == true };
             if (startupChanged) StartupRegistration.Apply(updated.StartWithWindows);
             try { updated.Save(); }
             catch { if (startupChanged) StartupRegistration.Apply(previous.StartWithWindows); throw; }
@@ -309,14 +333,36 @@ public partial class ClipWindow : Wpf.Window
             populating = true;
             StartWindowsToggle.IsChecked = previous.StartWithWindows;
             StartMinimizedToggle.IsChecked = previous.StartMinimized;
-            OverlayToggle.IsChecked = previous.Overlay;
             RamBufferToggle.IsChecked = previous.BufferInMemory;
             populating = false;
             GeneralSettingsStatus.Text = "Could not save settings: " + ex.Message;
         }
         StartMinimizedRow.Visibility = settings.StartWithWindows ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
-        recordingOverlay.Update(settings.Overlay, recorder.Recording, settings.Monitor);
         _ = UpdateBufferDriveWarning();
+    }
+
+    private void SaveCaptureOverlay()
+    {
+        if (populating) return;
+        var updated = settings with { Overlay = OverlayToggle.IsChecked == true, OverlayCorner = CaptureOverlayCorner.SelectedCorner };
+        if (updated == settings) return;
+        try
+        {
+            updated.Save();
+            settings = updated;
+            recorder.Settings = updated;
+            CaptureOverlayError.Visibility = Wpf.Visibility.Collapsed;
+            UpdateOverlays();
+        }
+        catch (Exception ex)
+        {
+            populating = true;
+            OverlayToggle.IsChecked = settings.Overlay;
+            CaptureOverlayCorner.SelectedCorner = settings.OverlayCorner;
+            populating = false;
+            CaptureOverlayError.Text = "Could not save overlay settings. " + ex.Message;
+            CaptureOverlayError.Visibility = Wpf.Visibility.Visible;
+        }
     }
 
     private async Task UpdateBufferDriveWarning()
@@ -350,6 +396,7 @@ public partial class ClipWindow : Wpf.Window
                 Bitrate = (int)Math.Round(mbps * 1000), Microphone = MicToggle.IsChecked == true, Cursor = CursorToggle.IsChecked == true,
                 ReplaySeconds = (ReplayLengthBox.SelectedIndex + 1) * 30,
                 MicrophoneDevice = (MicrophoneBox.SelectedItem as AudioDevice)?.Id ?? "default",
+                MicrophoneBoostDb = (int)MicrophoneBoost.Value,
                 GameWindow = (GameAppBox.SelectedItem as CaptureApp)?.Token ?? "auto",
                 Modifiers = modifiers, Key = key
             }).Validated();
@@ -553,7 +600,6 @@ public partial class ClipWindow : Wpf.Window
         ClearNotices();
         SelectPage(GeneralSettingsPanel, SettingsNav);
     }
-    private void RefreshMicrophones_Click(object sender, Wpf.RoutedEventArgs e) => recorder.RefreshMicrophones();
     private void RefreshApps_Click(object sender, Wpf.RoutedEventArgs e) => RefreshGameApps();
     private void RefreshGameApps()
     {
@@ -643,6 +689,7 @@ public partial class ClipWindow : Wpf.Window
     private void Cleanup()
     {
         if (cleaned) return; cleaned = true;
+        StopMicTest();
         updates.Changed -= UpdateStatus; updates.Dispose();
         timer.Stop(); if (registered) Win32.UnregisterHotKey(handle, hotkeyId);
         if (libraryRegistered) Win32.UnregisterHotKey(handle, libraryHotkeyId);
@@ -652,7 +699,7 @@ public partial class ClipWindow : Wpf.Window
         SystemEvents.PowerModeChanged -= PowerChanged; SystemEvents.DisplaySettingsChanged -= DisplayChanged;
         session.Dispose(); recorder.Dispose(); tray.Visible = false; var icon = tray.Icon; var menu = tray.ContextMenuStrip; tray.Dispose(); icon?.Dispose(); menu?.Dispose();
         library?.Dispose();
-        recordingOverlay.Close(); captureChime.Dispose();
+        recordingOverlay.Close(); separateRecordingOverlay.Close(); captureChime.Dispose();
     }
     private static Media.Brush Brush(string hex) => (Media.Brush)new Media.BrushConverter().ConvertFromString(hex)!;
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);

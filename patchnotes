@@ -1,3 +1,19 @@
+## [v0.7.0]
+
+### What's New
+
+- Microphone Boost setting added (Capture and Record)
+- Test Mic added
+- By Game now shows the size of the folder
+- Patch notes now show on update. Hello world!
+- Overlay Position controls included
+    - Move the overlay to a different location!
+
+### Bugfixes
+
+- Deleting a clip now correctly shows the progress
+
+
 ## [v0.6.9]
 
 ### What's New
@@ -5,7 +21,7 @@
 - Recording has been introduced
     - Recording overlay can be toggled on/off
     - Instant Replay can still be used while recording
-- Playback timer introduced inside clip preview
+- Playback timer added inside clip preview
     - 0.25x -> 2.00x
 - Master Volume is now included in the Audio Mixer
 - Audio sources now start their slider at 50%, letting you increase the volume if needed

@@ -16,6 +16,7 @@ internal sealed class Recorder : IDisposable
     private nint output, video, display, gameAudio, discord, microphone, scene;
     private nint gameMeter, microphoneMeter;
     private int gamePeak, microphonePeak;
+    private int testPeak = int.MinValue;
     private readonly Obs.AudioMeterUpdated audioMeterCallback;
     private readonly List<nint> audioEncoders = new();
     private CaptureApp? game;
@@ -49,6 +50,14 @@ internal sealed class Recorder : IDisposable
         {
             float db = Math.Max(BitConverter.Int32BitsToSingle(Marshal.ReadInt32(peak)),
                 BitConverter.Int32BitsToSingle(Marshal.ReadInt32(peak, sizeof(float))));
+            if (data == 2)
+            {
+                int sample = float.IsFinite(db) ? (int)Math.Round(db * 10) : -1200;
+                int previous;
+                do { previous = Volatile.Read(ref testPeak); }
+                while (sample > previous && Interlocked.CompareExchange(ref testPeak, sample, previous) != previous);
+                return;
+            }
             int level = float.IsFinite(db) ? (int)Math.Clamp((db + 60) * (100f / 60), 0, 100) : 0;
             if (data == 0) Volatile.Write(ref gamePeak, level);
             else Volatile.Write(ref microphonePeak, level);
@@ -75,7 +84,7 @@ internal sealed class Recorder : IDisposable
         };
     }
 
-    public void Start()
+    private (string Runtime, string Binaries) Initialize()
     {
         var runtime = Path.Combine(AppContext.BaseDirectory, "runtime");
         var binaries = Path.Combine(runtime, "bin", "64bit");
@@ -87,6 +96,27 @@ internal sealed class Recorder : IDisposable
         if (!Obs.obs_startup("en-US", Settings.DataDirectory, 0)) throw new InvalidOperationException("Could not initialize the OBS engine.");
         initialized = true;
         Log.Write("Engine " + Obs.Text(Obs.obs_get_version_string()));
+        return (runtime, binaries);
+    }
+
+    private static void InitializeAudio()
+    {
+        var ai = new Obs.AudioInfo { Rate = 48000, Speakers = 2 };
+        if (!Obs.obs_reset_audio(ref ai)) throw new InvalidOperationException("Audio initialization failed.");
+    }
+
+    private static void LoadModule(string runtime, string name, bool required)
+    {
+        var root = Path.Combine(runtime, "core", name);
+        int load = Obs.obs_open_module(out var module, Path.Combine(root, name + ".dll").Replace('\\', '/'), Path.Combine(root, "data").Replace('\\', '/'));
+        bool loaded = load == 0 && Obs.obs_init_module(module);
+        Log.Write($"Module {name}: {load}, initialized={loaded}");
+        if (!loaded && required) throw new InvalidOperationException($"Required recording component {name} could not load.");
+    }
+
+    public void Start()
+    {
+        var (runtime, binaries) = Initialize();
         var screen = Screen.AllScreens.FirstOrDefault(s => s.DeviceName == settings.Monitor) ?? Screen.PrimaryScreen ?? Screen.AllScreens[0];
         uint width = (uint)screen.Bounds.Width, height = (uint)screen.Bounds.Height;
         if (targetWindow != 0)
@@ -106,16 +136,9 @@ internal sealed class Recorder : IDisposable
         };
         int result = Obs.obs_reset_video(ref vi);
         if (result != 0) throw new InvalidOperationException($"Graphics initialization failed ({result}).");
-        var ai = new Obs.AudioInfo { Rate = 48000, Speakers = 2 };
-        if (!Obs.obs_reset_audio(ref ai)) throw new InvalidOperationException("Audio initialization failed.");
+        InitializeAudio();
         foreach (var name in new[] { "win-capture", "win-wasapi", "obs-ffmpeg", "obs-nvenc", "obs-qsv11" })
-        {
-            var root = Path.Combine(runtime, "core", name);
-            int load = Obs.obs_open_module(out var module, Path.Combine(root, name + ".dll").Replace('\\', '/'), Path.Combine(root, "data").Replace('\\', '/'));
-            bool loaded = load == 0 && Obs.obs_init_module(module);
-            Log.Write($"Module {name}: {load}, initialized={loaded}");
-            if (!loaded && name is "win-capture" or "win-wasapi" or "obs-ffmpeg") throw new InvalidOperationException($"Required recording component {name} could not load.");
-        }
+            LoadModule(runtime, name, name is "win-capture" or "win-wasapi" or "obs-ffmpeg");
         Obs.obs_post_load_modules();
         SendMicrophoneDevices();
         display = MakeSource(targetWindow == 0 ? "monitor_capture" : "window_capture", "Recording source", d =>
@@ -142,7 +165,11 @@ internal sealed class Recorder : IDisposable
         discordExecutable = discordApp?.Executable ?? settings.DiscordExecutable;
         if (recordingFile == null)
             discord = MakeSource("wasapi_process_output_capture", "Discord", d => ConfigureProcess(d, discordApp?.Token ?? ":Chrome_WidgetWin_1:" + AppTargets.Encode(discordExecutable)));
-        if (settings.Microphone) microphone = MakeSource("wasapi_input_capture", "Microphone", d => Obs.obs_data_set_string(d, "device_id", string.IsNullOrEmpty(settings.MicrophoneDevice) ? "default" : settings.MicrophoneDevice));
+        if (settings.Microphone)
+        {
+            microphone = CreateMicrophone(settings.MicrophoneDevice);
+            Obs.obs_source_set_volume(microphone, (float)Math.Pow(10, settings.MicrophoneBoostDb / 20.0));
+        }
         if (targetWindow == 0) Obs.obs_set_output_source(0, display);
         else
         {
@@ -358,6 +385,43 @@ internal sealed class Recorder : IDisposable
             finally { Obs.obs_properties_destroy(props); }
         }
         send(new("microphones", JsonSerializer.Serialize(devices)));
+    }
+    private static nint CreateMicrophone(string device) => MakeSource("wasapi_input_capture", "Microphone",
+        d => Obs.obs_data_set_string(d, "device_id", string.IsNullOrEmpty(device) ? "default" : device));
+
+    internal static int RunMicrophoneTest(string device)
+    {
+        void Send(WorkerMessage message)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(message));
+            Console.Out.Flush();
+        }
+
+        try
+        {
+            using var engine = new Recorder(new Settings(), Send);
+            var (runtime, _) = engine.Initialize();
+            InitializeAudio();
+            LoadModule(runtime, "win-wasapi", required: true);
+            Obs.obs_post_load_modules();
+            engine.SendMicrophoneDevices();
+            engine.microphone = CreateMicrophone(device);
+            engine.microphoneMeter = engine.AttachMeter(engine.microphone, 2);
+            if (engine.microphoneMeter == 0) throw new IOException("Could not open the microphone level meter.");
+            var stop = Task.Run(() => Console.In.ReadLine());
+            while (!stop.Wait(80))
+            {
+                int peak = Interlocked.Exchange(ref engine.testPeak, int.MinValue);
+                Send(new("mic-test-level", MicLevel: peak));
+            }
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Log.Write("Microphone test: " + ex);
+            Send(new("error", ex.Message));
+            return 1;
+        }
     }
     private static nint MakeSource(string id, string name, Action<nint> configure)
     {
